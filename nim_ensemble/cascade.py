@@ -77,13 +77,14 @@ TASK_KEYWORDS = {
 }
 
 # Default panels — good starting points, override via capability_map.json
+# Profiled on real judgment tasks 2026-03-14
 _DEFAULT_BEST_FOR_TASK = {
-    "code":       ["gemma-27b", "mistral-large", "nemotron-super-49b"],
-    "compliance": ["gemma-27b", "mistral-large", "nemotron-super-49b"],
-    "reasoning":  ["mistral-large", "nemotron-super-49b", "gemma-27b"],
-    "factual":    ["mistral-large", "gemma-27b", "nemotron-super-49b"],
-    "nuance":     ["gemma-27b", "mistral-large", "nemotron-super-49b"],
-    "general":    ["mistral-large", "nemotron-super-49b", "gemma-27b"],
+    "code":       ["jamba-mini", "dracarys-70b", "kimi-k2"],
+    "compliance": ["jamba-mini", "kimi-k2", "dracarys-70b"],
+    "reasoning":  ["jamba-mini", "kimi-k2", "llama-3.3"],
+    "factual":    ["jamba-mini", "dracarys-70b", "llama-3.3"],
+    "nuance":     ["jamba-mini", "kimi-k2", "dracarys-70b"],
+    "general":    ["jamba-mini", "dracarys-70b", "kimi-k2"],
 }
 
 # Default weights (equal) — override via capability_map.json profiling
@@ -127,7 +128,7 @@ def _get_routing():
     
     return best_for, weights
 
-ARBITER = "mistral-large"  # 100% across all categories
+ARBITER = "jamba-mini"  # 100% accuracy on real judgment tasks (profiled 2026-03-14)
 
 
 @dataclass
@@ -363,7 +364,7 @@ def _weighted_panel_vote(question, task_type, answer_patterns, system_prompt,
             best_for_task = bft
         if model_weights is None:
             model_weights = mw
-    panel_models = best_for_task.get(task_type, best_for_task.get("general", ["mistral-large", "nemotron-super-49b", "gemma-27b"]))
+    panel_models = best_for_task.get(task_type, best_for_task.get("general", ["jamba-mini", "dracarys-70b", "kimi-k2"]))
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -561,10 +562,10 @@ def scale(
     else:
         families_seen = set()
         diverse_order = []
-        for alias in ["mistral-large", "nemotron-super-49b", "gemma-27b",
-                      "kimi-k2", "llama-3.3", "qwen-397b", "llama-405b",
-                      "jamba-mini", "dracarys-70b",
-                      "mistral-medium"]:
+        # Ordered by profiled accuracy (2026-03-14), then latency
+        for alias in ["jamba-mini", "dracarys-70b", "kimi-k2",
+                      "llama-3.3", "mistral-medium", "llama-405b",
+                      "mistral-large", "gemma-27b", "nemotron-super-49b"]:
             if alias in MODELS:
                 fam = MODELS[alias]["family"]
                 if fam not in families_seen:

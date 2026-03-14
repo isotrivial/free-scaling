@@ -109,15 +109,17 @@ MODELS = {
 # Default panels — diversity-based (mix model families for independent errors).
 # Override with capability_map.json for data-driven routing.
 PANELS = {
-    # General: 3 different families (Mistral/NVIDIA/Google)
-    # llama-3.3 removed — returns UNCLEAR on 60%+ of judgment tasks
-    "general": ["mistral-large", "nemotron-super-49b", "gemma-27b"],
-    # Fast: all <1.5s, different families
-    "fast": ["nemotron-super-49b", "gemma-27b", "dracarys-70b"],
-    # Max: 5 models for highest confidence
-    "max": ["mistral-large", "nemotron-super-49b", "gemma-27b", "kimi-k2", "qwen-397b"],
-    # Arbiter: single tiebreaker
-    "arbiter": ["mistral-large"],
+    # General: 3 top-performing families (AI21/Nvidia-Llama/Mistral-Kimi)
+    # Profiled on real judgment tasks 2026-03-14:
+    #   jamba-mini 100%, dracarys-70b 83%, kimi-k2 83%, llama-3.3 83%
+    #   mistral-large 50%, gemma-27b 50%, nemotron-super-49b 50%
+    "general": ["jamba-mini", "dracarys-70b", "kimi-k2"],
+    # Fast: all <1s, different families
+    "fast": ["jamba-mini", "dracarys-70b", "llama-3.3"],
+    # Max: 5 best models for highest confidence
+    "max": ["jamba-mini", "dracarys-70b", "kimi-k2", "llama-3.3", "mistral-medium"],
+    # Arbiter: single best tiebreaker (was mistral-large at 50%, jamba-mini at 100%)
+    "arbiter": ["jamba-mini"],
 }
 
 
