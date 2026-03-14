@@ -75,8 +75,9 @@ def cmd_ask(args):
 def cmd_classify(args):
     """Classify a question's task type."""
     task = classify_task(args.question)
-    from .cascade import BEST_FOR_TASK
-    models = BEST_FOR_TASK.get(task, BEST_FOR_TASK["general"])
+    from .cascade import _DEFAULT_BEST_FOR_TASK, _get_routing
+    best_for, _ = _get_routing()
+    models = best_for.get(task, _DEFAULT_BEST_FOR_TASK["general"])
     print(f"{task} → {models}")
 
 

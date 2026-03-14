@@ -56,9 +56,9 @@ TASK_KEYWORDS = {
         "def ", "class ", "return ", "```",
     ],
     "compliance": [
-        "compliant", "violated", "following the rule", "preamble",
-        "personality", "soul", "character", "behavior", "tone",
-        "helpdesk", "filler", "direct",
+        "compliant", "violated", "following the rule", "follow the rule",
+        "preamble", "personality", "soul", "character", "behavior", "tone",
+        "helpdesk", "filler", "direct", "rule", "policy", "guideline",
     ],
     "reasoning": [
         "taller than", "greater than", "then", "therefore",
