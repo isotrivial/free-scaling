@@ -24,28 +24,30 @@ $0 multi-model reasoning using NVIDIA NIM free tier. Two modes:
 ## Quick Start
 
 ```python
-from nim_ensemble import smart_vote
+from nim_ensemble import scale
 
-# Auto-classifies as "code", routes to qwen-80b (100% on code)
-result = smart_vote("Is eval(input()) safe?", answer_patterns=["SAFE", "VULNERABLE"])
+# k=3: ask 3 diverse models, majority vote
+result = scale("Is eval(input()) safe?", k=3, answer_patterns=["SAFE", "VULNERABLE"])
 print(result.answer)      # VULNERABLE
-print(result.calls_made)  # 1 (resolved at stage 1, no escalation)
+print(result.calls_made)  # 3
 print(result.confidence)  # 1.0
+
+# k="auto": smart cascade (starts with 1, escalates on uncertainty)
+result = scale("Is this correct?", k="auto", answer_patterns=["YES", "NO"])
 ```
 
 ## CLI
 
 ```bash
-# Smart cascade (recommended)
-python3 -m nim_ensemble.cli smart "Is this code vulnerable?" --answers "SAFE,VULNERABLE"
-# → VULNERABLE (conf=100%, primary, 1 call, 0.5s)
+# Scale to k models
+python3 -m nim_ensemble.cli scale "Is this code vulnerable?" -k 3 --answers "SAFE,VULNERABLE"
+# → VULNERABLE (k=3, conf=100%, 3 calls, 1.2s)
 
-# Flat ensemble
-python3 -m nim_ensemble.cli ask "Is X true?" --panel general --answers "YES,NO"
+# Single model (fastest)
+python3 -m nim_ensemble.cli scale "Is 91 prime?" -k 1 --answers "YES,NO"
 
-# Classify task type
-python3 -m nim_ensemble.cli classify "Is this SQL injection?"
-# → code → ['qwen-80b', 'mistral-large', 'mistral-nemotron']
+# Auto-scale (smart cascade)
+python3 -m nim_ensemble.cli scale "Is this safe?" -k auto
 
 # List models and panels
 python3 -m nim_ensemble.cli models
@@ -83,40 +85,36 @@ This generates `capability_map.json` with per-model accuracy, latency, strengths
 
 **Without profiling**, the cascade uses sensible defaults (mistral-large as arbiter, diverse 3-model panels). Profiling lets it route around your models' specific blind spots.
 
-## Data-Driven Panels
+## Default Panels
 
-Panels are built from measured capability data, not intuition:
+Panels maximize architectural diversity (independent errors cancel out):
 
 | Panel | Models | Use Case |
 |-------|--------|----------|
-| `general` | mistral-large, llama-3.3, qwen-80b | Default, >95% accuracy |
-| `fast` | qwen-80b, mistral-nemotron, gemma-27b | All ≤1.2s |
-| `code` | qwen-80b, mistral-large, mistral-nemotron | Code review (kimi-k2 excluded) |
-| `compliance` | llama-3.3, qwen-80b, mistral-large | Behavioral/rule compliance |
-| `reasoning` | mistral-large, llama-3.3, mistral-nemotron | Logic, math, inference |
-| `nuance` | llama-3.3, qwen-80b, mistral-large | Subtle violations, gray areas |
-| `arbiter` | mistral-large | Tiebreaker (100% all categories) |
-| `max` | 5 models | High-stakes, maximum confidence |
+| `general` | mistral-large, llama-3.3, qwen-80b | Default (3 families) |
+| `fast` | llama-3.3, mistral-nemotron, gemma-27b | All <1.5s |
+| `max` | 5 models across 5 families | High-stakes |
+| `arbiter` | mistral-large | Single tiebreaker |
+
+For task-specific panels, run `capability_map` to profile models on your data.
 
 ## Python API
 
 ```python
-from nim_ensemble import smart_vote, smart_vote_batch, vote, vote_batch
+from nim_ensemble import scale, smart_vote, vote, call_model
 
-# Smart cascade (recommended)
+# scale() — the core API, control k
+result = scale("Is X safe?", k=3, answer_patterns=["SAFE", "VULNERABLE"])
+result = scale("Is X safe?", k="auto")  # smart cascade
+result = scale("Is X safe?", k=1)       # single model
+
+# smart_vote() — cascade with task-type routing
 result = smart_vote("Is X correct?", answer_patterns=["YES", "NO"])
-# result.answer, result.confidence, result.stage, result.calls_made
 
-# Batch (parallel)
-results = smart_vote_batch([
-    {"text": "Q1?", "task_type": "code", "answer_patterns": ["SAFE", "VULNERABLE"]},
-    {"text": "Q2?", "task_type": "compliance", "answer_patterns": ["COMPLIANT", "VIOLATED"]},
-], max_parallel=5)
-
-# Flat ensemble
+# vote() — flat ensemble with named panels
 result = vote("Is X true?", panel="general", answer_patterns=["YES", "NO"])
 
-# Single model call
+# call_model() — single model, raw access
 from nim_ensemble import call_model
 answer, raw = call_model("Is X true?", "mistral-large")
 ```

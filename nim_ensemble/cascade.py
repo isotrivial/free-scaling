@@ -99,23 +99,31 @@ def _get_routing():
     
     policy = cap["routing_policy"]
     
-    # Build BEST_FOR_TASK from routing_policy panels
+    # Build BEST_FOR_TASK from routing_policy panels (try both key names)
     best_for = {}
-    for task_type, models in policy.get("panels", {}).items():
+    panels = policy.get("panels", policy.get("recommended_panels", {}))
+    for task_type, models in panels.items():
         best_for[task_type] = models
     # Merge defaults for any missing task types
     for k, v in _DEFAULT_BEST_FOR_TASK.items():
         if k not in best_for:
             best_for[k] = v
     
-    # Build MODEL_WEIGHTS from profiles
+    # Build MODEL_WEIGHTS from profiles — extract accuracy floats from nested dicts
     weights = {}
     for alias, profile in cap.get("profiles", {}).items():
         cats = profile.get("category_scores", {})
-        weights[alias] = {cat: score for cat, score in cats.items()}
+        w = {}
+        for cat, info in cats.items():
+            # Handle both formats: {"accuracy": 0.9, ...} or plain float 0.9
+            if isinstance(info, dict):
+                w[cat] = info.get("accuracy", _DEFAULT_MODEL_WEIGHT)
+            else:
+                w[cat] = float(info)
         # Add overall as "general"
-        if "general" not in weights[alias]:
-            weights[alias]["general"] = profile.get("accuracy", _DEFAULT_MODEL_WEIGHT)
+        if "general" not in w:
+            w["general"] = profile.get("accuracy", _DEFAULT_MODEL_WEIGHT)
+        weights[alias] = w
     
     return best_for, weights
 
@@ -246,7 +254,7 @@ def smart_vote(
         if answer_patterns and arbiter_ans not in answer_patterns and arbiter_ans != "ERROR":
             arbiter_ans = parse_answer(arbiter_raw, patterns=answer_patterns)
         
-        arbiter_weight = model_weights.get(ARBITER, {}).get(task_type, _DEFAULT_MODEL_WEIGHT)
+        arbiter_weight = model_weights.get(ARBITER, {}).get(task_type, 1.0)  # Arbiter gets full weight by default
     
         # If primary answered and arbiter agrees → done
         if ans1 not in ("ERROR", "UNCLEAR") and arbiter_ans == ans1:
@@ -410,3 +418,118 @@ def smart_vote_batch(
             results[idx] = result
     
     return results
+
+
+def scale(
+    question: str,
+    k: int | str = "auto",
+    answer_patterns: list[str] = None,
+    system_prompt: str = None,
+    max_tokens: int = 150,
+) -> CascadeResult:
+    """Scale inference by asking k models the same question.
+    
+    The core API — control the cost/accuracy tradeoff with a single parameter.
+    
+    Args:
+        question: The question to answer
+        k: Number of models to query:
+           - "auto": smart cascade (start with 1, escalate on uncertainty)
+           - 1: single best model (fastest, cheapest)
+           - 3: ensemble of 3 diverse models (balanced)
+           - 5: maximum confidence panel
+           - Any int: picks that many models from diverse families
+        answer_patterns: Expected answer tokens (e.g. ["YES", "NO"])
+        system_prompt: Optional system prompt
+        max_tokens: Max tokens per call
+    
+    Returns:
+        CascadeResult with answer, confidence, calls_made
+    """
+    if k == "auto":
+        return smart_vote(question, answer_patterns=answer_patterns,
+                         system_prompt=system_prompt, max_tokens=max_tokens)
+    
+    k = int(k)
+    if k < 1:
+        raise ValueError("k must be >= 1 or 'auto'")
+    
+    t0 = time.time()
+    
+    # Pick k models — maximize family diversity
+    all_models = list(MODELS.keys())
+    # Sort by family to interleave different architectures
+    families_seen = set()
+    diverse_order = []
+    # First pass: one per family
+    for alias in ["mistral-large", "llama-3.3", "qwen-80b", "gemma-27b", 
+                  "kimi-k2", "mistral-nemotron", "llama-405b", "qwen-397b",
+                  "nemotron-super-49b", "jamba-mini", "dracarys-70b",
+                  "deepseek-v3.1-term", "mistral-medium"]:
+        if alias in MODELS:
+            fam = MODELS[alias]["family"]
+            if fam not in families_seen:
+                diverse_order.append(alias)
+                families_seen.add(fam)
+            else:
+                diverse_order.append(alias)  # still add, but after first-of-family
+    
+    selected = diverse_order[:k]
+    
+    if k == 1:
+        # Single model — use arbiter
+        model = ARBITER
+        ans, raw = call_model(question, model, system_prompt, max_tokens)
+        if answer_patterns:
+            answer_patterns = [p.strip().upper() for p in answer_patterns]
+            if ans not in answer_patterns and ans != "ERROR":
+                ans = parse_answer(raw, patterns=answer_patterns)
+        
+        return CascadeResult(
+            answer=ans,
+            confidence=1.0 if ans != "ERROR" else 0.0,
+            task_type="general",
+            stage="primary",
+            calls_made=1,
+            models_used=[model],
+            votes=[(model, ans, 1.0)],
+            elapsed_s=time.time() - t0,
+            reasoning=f"Single model ({model}): {ans}",
+        )
+    
+    # k >= 2: parallel ensemble vote
+    if answer_patterns:
+        answer_patterns = [p.strip().upper() for p in answer_patterns]
+    
+    all_votes = []
+    calls = 0
+    
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    def _call(alias):
+        ans, raw = call_model(question, alias, system_prompt, max_tokens)
+        if answer_patterns and ans not in answer_patterns and ans != "ERROR":
+            ans = parse_answer(raw, patterns=answer_patterns)
+        return alias, ans, raw
+    
+    with ThreadPoolExecutor(max_workers=k) as pool:
+        futures = {pool.submit(_call, alias): alias for alias in selected}
+        for fut in as_completed(futures):
+            alias, ans, raw = fut.result()
+            calls += 1
+            if ans != "ERROR":
+                all_votes.append((alias, ans, 1.0))  # Equal weight without profiling
+    
+    answer, confidence = _weighted_majority(all_votes)
+    
+    return CascadeResult(
+        answer=answer,
+        confidence=confidence,
+        task_type="general",
+        stage=f"scale-{k}",
+        calls_made=calls,
+        models_used=selected,
+        votes=all_votes,
+        elapsed_s=time.time() - t0,
+        reasoning=f"Scaled to {k} models: {answer} ({confidence:.0%} agreement).",
+    )

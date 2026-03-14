@@ -12,12 +12,14 @@ Usage:
 """
 
 from .voter import vote, vote_batch, call_model, VoteResult
-from .cascade import smart_vote, smart_vote_batch, classify_task, CascadeResult
+from .cascade import smart_vote, smart_vote_batch, classify_task, scale, CascadeResult
 from .models import MODELS, PANELS, get_model, get_panel, list_models, is_thinking
 from .parser import parse_answer, strip_thinking, extract_content
 
 __all__ = [
-    # Cascade (preferred)
+    # Core API
+    "scale",
+    # Cascade
     "smart_vote", "smart_vote_batch", "classify_task", "CascadeResult",
     # Flat ensemble (legacy)
     "vote", "vote_batch", "call_model", "VoteResult",

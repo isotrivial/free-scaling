@@ -41,7 +41,7 @@ MODELS = {
         "thinking": False,
     },
 
-    # Medium tier (1-2s)
+    # Medium tier (1-3s)
     "kimi-k2": {
         "id": "moonshotai/kimi-k2-instruct",
         "speed": "medium",
@@ -91,6 +91,8 @@ MODELS = {
         "params": "49B",
         "thinking": False,
     },
+
+    # Slow tier (3s+)
     "deepseek-v3.1-term": {
         "id": "deepseek-ai/deepseek-v3.1-terminus",
         "speed": "slow",
@@ -118,45 +120,20 @@ MODELS = {
     },
 }
 
-# Models that give false passes (too agreeable) — excluded from panels by default
+# Models that give false passes — excluded from default panels
 EXCLUDED = {"phi-4-mini", "phi-3-small", "deepseek-v3.1", "chatglm3-6b", "italia-10b"}
 
-# Data-driven panels (from capability_map.json, 2026-03-14)
-# Each panel is designed around measured strengths, not assumed capability.
+# Default panels — diversity-based (mix model families for independent errors).
+# Override with capability_map.json for data-driven routing.
 PANELS = {
-    # === General purpose ===
-    # Top 3 by overall accuracy, architecture-diverse (Mistral/Meta/Qwen)
+    # General: 3 different families (Mistral/Meta/Qwen)
     "general": ["mistral-large", "llama-3.3", "qwen-80b"],
-    # Fast + accurate: all ≤1.2s, all ≥93%
-    "fast": ["qwen-80b", "mistral-nemotron", "gemma-27b"],
-    
-    # === Task-specific (data-driven) ===
-    # Code: all 100% on code category. AVOID kimi-k2 (44%) and qwen-397b (0%)
-    "code": ["qwen-80b", "mistral-large", "mistral-nemotron"],
-    # Compliance/behavioral: all 100% on nuance + agreeableness
-    "compliance": ["llama-3.3", "qwen-80b", "mistral-large"],
-    # Reasoning: all 100% on reasoning + factual
-    "reasoning": ["mistral-large", "llama-3.3", "mistral-nemotron"],
-    # Nuance: best at subtle violations + pushback
-    "nuance": ["llama-3.3", "qwen-80b", "mistral-large"],
-    
-    # === Escalation ===
-    # Arbiter: single model, 100% across ALL 7 categories
-    "arbiter": ["mistral-large"],
+    # Fast: all <1.5s, different families
+    "fast": ["llama-3.3", "mistral-nemotron", "gemma-27b"],
     # Max: 5 models for highest confidence
     "max": ["mistral-large", "llama-3.3", "qwen-80b", "mistral-nemotron", "gemma-27b"],
-    
-    # === Legacy (kept for compatibility) ===
-    "balanced": ["mistral-large", "llama-3.3", "qwen-80b"],  # alias for general
-    "deep": ["mistral-large", "llama-3.3", "qwen-80b"],      # alias for general
-    "diverse": ["llama-3.3", "qwen-80b", "mistral-large"],   # same models, different order
-}
-
-# Models to AVOID for specific task types (measured weaknesses)
-AVOID = {
-    "code": {"kimi-k2", "qwen-397b"},           # kimi 44%, qwen 0%
-    "agreeableness": {"kimi-k2", "qwen-397b"},   # kimi 22%, qwen 33%
-    "nuance": {"minimax-m2.5"},                   # 0% on nuance despite thinking
+    # Arbiter: single tiebreaker
+    "arbiter": ["mistral-large"],
 }
 
 
@@ -164,7 +141,6 @@ def get_model(alias: str) -> dict:
     """Look up model by alias. Returns model dict with 'id' key."""
     if alias in MODELS:
         return MODELS[alias]
-    # Try matching by full NIM model ID
     for m in MODELS.values():
         if m["id"] == alias:
             return m
@@ -180,17 +156,13 @@ def get_panel(name: str) -> list[str]:
 
 def is_thinking(alias: str) -> bool:
     """Check if a model is a thinking model (needs special handling)."""
-    m = MODELS.get(alias, {})
-    return m.get("thinking", False)
+    return MODELS.get(alias, {}).get("thinking", False)
 
 
 def list_models(speed: str = None, family: str = None) -> list[str]:
     """List model aliases, optionally filtered."""
-    results = []
-    for alias, m in MODELS.items():
-        if speed and m.get("speed") != speed:
-            continue
-        if family and m.get("family") != family:
-            continue
-        results.append(alias)
-    return results
+    return [
+        alias for alias, m in MODELS.items()
+        if (not speed or m.get("speed") == speed)
+        and (not family or m.get("family") == family)
+    ]

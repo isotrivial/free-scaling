@@ -90,8 +90,6 @@ def call_model(
         except urllib.error.URLError as e:
             return "ERROR", f"URL error: {e.reason}"
         
-        proc = None  # compatibility marker
-        
         if not raw:
             return "ERROR", "Empty response"
         

@@ -7,7 +7,39 @@ import sys
 import time
 
 from . import vote, vote_batch, call_model, MODELS, PANELS, list_models
-from . import smart_vote, classify_task
+from . import smart_vote, classify_task, scale
+
+
+def cmd_scale(args):
+    """Scale inference — the core API."""
+    patterns = args.answers.split(",") if args.answers else None
+    k = args.k if args.k != "auto" else "auto"
+    if k != "auto":
+        k = int(k)
+    
+    result = scale(
+        args.question,
+        k=k,
+        answer_patterns=patterns,
+        system_prompt=args.system,
+    )
+    
+    if args.json:
+        print(json.dumps({
+            "answer": result.answer,
+            "confidence": result.confidence,
+            "k": args.k,
+            "calls_made": result.calls_made,
+            "stage": result.stage,
+            "models": result.models_used,
+            "elapsed_s": round(result.elapsed_s, 2),
+        }))
+    else:
+        print(f"{result.answer} (k={args.k}, conf={result.confidence:.0%}, {result.calls_made} calls, {result.elapsed_s:.1f}s)")
+        if args.verbose:
+            for model, ans, w in result.votes:
+                print(f"  {model}: {ans}")
+            print(f"  reasoning: {result.reasoning}")
 
 
 def cmd_smart(args):
@@ -121,8 +153,18 @@ def main():
     )
     sub = parser.add_subparsers(dest="command")
     
-    # smart (primary)
-    p_smart = sub.add_parser("smart", help="Smart cascade (recommended)")
+    # scale (primary API)
+    p_scale = sub.add_parser("scale", help="Scale inference to k models")
+    p_scale.add_argument("question", help="Question to answer")
+    p_scale.add_argument("-k", default="auto", help="Number of models: 1, 3, 5, or 'auto' (default: auto)")
+    p_scale.add_argument("--answers", "-a", help="Comma-separated valid answers")
+    p_scale.add_argument("--system", "-s", help="System prompt")
+    p_scale.add_argument("--json", "-j", action="store_true")
+    p_scale.add_argument("--verbose", "-v", action="store_true")
+    p_scale.set_defaults(func=cmd_scale)
+    
+    # smart (cascade — alias for scale --k auto)
+    p_smart = sub.add_parser("smart", help="Smart cascade (alias for scale -k auto)")
     p_smart.add_argument("question", help="Question to answer")
     p_smart.add_argument("--answers", "-a", help="Comma-separated valid answers")
     p_smart.add_argument("--type", "-t", help="Task type (code/compliance/reasoning/factual/nuance)")
@@ -169,7 +211,16 @@ def main():
         parser.print_help()
         return
     
-    args.func(args)
+    try:
+        args.func(args)
+    except RuntimeError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except KeyError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        sys.exit(130)
 
 
 if __name__ == "__main__":

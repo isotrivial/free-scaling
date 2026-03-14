@@ -2,13 +2,16 @@
 
 $0 test-time scaling using [NVIDIA NIM](https://build.nvidia.com) free tier. Ask multiple models, get one reliable answer.
 
-**Two modes:**
-- **`smart_vote()`** — cascade: routes to the best expert for the task type, escalates only on uncertainty. ~1 API call per question on average.
-- **`vote()`** — flat ensemble: asks N models, majority vote.
+```python
+from nim_ensemble import scale
+
+result = scale("Is this code safe?", k=3, answer_patterns=["SAFE", "VULNERABLE"])
+# → VULNERABLE (k=3, conf=100%, 3 calls, 1.2s)
+```
 
 ## Why
 
-Single models hallucinate. Ensembles don't (as much). NIM gives you 15 models for free. This library turns them into a single reliable oracle — routing questions to the right expert, escalating only when uncertain, and weighting votes by measured accuracy.
+Single models hallucinate. Ensembles don't (as much). NIM gives you 15 models for free. This library turns them into a single reliable oracle with one parameter: **k** — the number of models to ask.
 
 **Zero cost. Zero dependencies. Just stdlib Python + a free API key.**
 
@@ -19,7 +22,7 @@ Single models hallucinate. Ensembles don't (as much). NIM gives you 15 models fo
    ```bash
    export NVIDIA_API_KEY="nvapi-..."
    ```
-3. Clone this repo and use it:
+3. Clone and use:
    ```bash
    git clone https://github.com/isotrivial/free-scaling.git
    cd free-scaling
@@ -31,59 +34,72 @@ No pip install needed — stdlib only (Python 3.10+).
 
 ### CLI
 ```bash
-# Smart cascade (recommended)
-python3 -m nim_ensemble.cli smart "Is eval(input()) safe?" --answers "SAFE,VULNERABLE"
-# → VULNERABLE (conf=100%, primary, 1 call, 0.5s)
+# Scale to 3 models
+python3 -m nim_ensemble.cli scale "Is eval(input()) safe?" -k 3 --answers "SAFE,VULNERABLE"
+# → VULNERABLE (k=3, conf=100%, 3 calls, 1.2s)
 
-# Flat ensemble vote
-python3 -m nim_ensemble.cli ask "Is 91 prime?" --panel general --answers "YES,NO"
+# Single model (fastest)
+python3 -m nim_ensemble.cli scale "Is 91 prime?" -k 1 --answers "YES,NO"
+# → NO (k=1, conf=100%, 1 call, 0.5s)
 
-# List available models and panels
-python3 -m nim_ensemble.cli models
-python3 -m nim_ensemble.cli panels
+# Auto-scale (smart cascade — starts with 1, adds more if uncertain)
+python3 -m nim_ensemble.cli scale "Is this compliant?" -k auto
 ```
 
 ### Python
 ```python
-from nim_ensemble import smart_vote
+from nim_ensemble import scale
 
-result = smart_vote("Is this code safe?", answer_patterns=["SAFE", "VULNERABLE"])
+# k=1: single best model (fast, cheap)
+result = scale("Is this safe?", k=1)
+
+# k=3: 3 diverse models (balanced)
+result = scale("Is this safe?", k=3, answer_patterns=["SAFE", "VULNERABLE"])
+
+# k=5: maximum confidence
+result = scale("Is this safe?", k=5)
+
+# k="auto": smart cascade (1→2→N, escalates on uncertainty)
+result = scale("Is this safe?", k="auto")
+
 print(result.answer)      # VULNERABLE
-print(result.calls_made)  # 1 (resolved at stage 1)
 print(result.confidence)  # 1.0
+print(result.calls_made)  # 3
 ```
 
-## How the Cascade Works
+## How It Works
 
+**`k=1`**: Asks the single best model (mistral-large).
+
+**`k=N`**: Asks N models from diverse families (Mistral, Meta, Qwen, Google, etc.), majority vote. Models are selected to maximize architectural diversity — independent errors cancel out.
+
+**`k="auto"`** (smart cascade):
 ```
-Question → classify task type (code/compliance/reasoning/factual/nuance)
-        → call best expert for that type (1 call)
+Question → classify task type → call best expert (1 call)
         → confident? → done
-        → uncertain? → call arbiter (mistral-large)
-        → still split? → full panel, weighted vote
+        → uncertain? → call arbiter
+        → still split? → full panel vote
 ```
 
-Most questions resolve at stage 1 with a single API call.
+Most questions resolve with 1-2 calls. Scales up only when needed.
 
-## Capability Profiling
+## Capability Profiling (optional)
 
-No hardcoded scores — profile models on your own tasks:
+Default panels are diversity-based. For data-driven routing, profile models on your tasks:
 
 ```bash
 python3 -m nim_ensemble.capability_map --models llama-3.3 qwen-80b mistral-large --trials 3
 ```
 
-Generates `capability_map.json` with per-model accuracy, latency, and error correlations. The cascade loads it automatically for data-driven routing.
-
-Without profiling, sensible defaults work out of the box.
+Generates `capability_map.json` — the cascade loads it automatically to route around each model's measured blind spots.
 
 ## 15 Models Included
 
-| Speed | Models |
-|-------|--------|
-| Fast (<1s) | llama-3.3 70B, gemma-27b, mistral-nemotron, kimi-k2, qwen-80b |
-| Medium (1-3s) | mistral-large 675B, llama-405b, qwen-397b, deepseek-v3 |
-| Slow (3s+) | minimax-m2.5 (thinking) |
+| Tier | Models |
+|------|--------|
+| Fast (<1s) | llama-3.3 70B, gemma-27b, mistral-nemotron, dracarys-70b, jamba-mini |
+| Medium (1-3s) | mistral-large 675B, kimi-k2, qwen-80b, qwen-397b, llama-405b, mistral-medium, nemotron-super-49b |
+| Slow (3s+) | deepseek-v3.1, minimax-m2.5 🧠, kimi-k2.5 🧠 |
 
 All free via NVIDIA NIM. One API key covers everything.
 
@@ -93,11 +109,10 @@ All free via NVIDIA NIM. One API key covers everything.
 - **Fact-checking** — consensus answers to factual questions
 - **Compliance auditing** — check if outputs follow rules/policies
 - **Agent self-evaluation** — verify agent behavior against specs
-- **Any binary/categorical judgment** — route to experts, vote on uncertainty
+- **Any binary/categorical judgment** — scale compute to match stakes
 
 ## Also an OpenClaw Skill
 
-If you use [OpenClaw](https://github.com/openclaw/openclaw), install via:
 ```bash
 clawhub install free-scaling
 ```
@@ -106,4 +121,4 @@ See [SKILL.md](SKILL.md) for the full agent skill reference.
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
