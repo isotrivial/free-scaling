@@ -78,12 +78,12 @@ TASK_KEYWORDS = {
 
 # Default panels — good starting points, override via capability_map.json
 _DEFAULT_BEST_FOR_TASK = {
-    "code":       ["gemma-27b", "mistral-large", "llama-3.3"],
-    "compliance": ["llama-3.3", "gemma-27b", "mistral-large"],
-    "reasoning":  ["mistral-large", "llama-3.3", "nemotron-super-49b"],
-    "factual":    ["mistral-large", "llama-3.3", "gemma-27b"],
-    "nuance":     ["llama-3.3", "gemma-27b", "mistral-large"],
-    "general":    ["mistral-large", "llama-3.3", "gemma-27b"],
+    "code":       ["gemma-27b", "mistral-large", "nemotron-super-49b"],
+    "compliance": ["gemma-27b", "mistral-large", "nemotron-super-49b"],
+    "reasoning":  ["mistral-large", "nemotron-super-49b", "gemma-27b"],
+    "factual":    ["mistral-large", "gemma-27b", "nemotron-super-49b"],
+    "nuance":     ["gemma-27b", "mistral-large", "nemotron-super-49b"],
+    "general":    ["mistral-large", "nemotron-super-49b", "gemma-27b"],
 }
 
 # Default weights (equal) — override via capability_map.json profiling
@@ -363,7 +363,7 @@ def _weighted_panel_vote(question, task_type, answer_patterns, system_prompt,
             best_for_task = bft
         if model_weights is None:
             model_weights = mw
-    panel_models = best_for_task.get(task_type, best_for_task.get("general", ["mistral-large", "llama-3.3", "gemma-27b"]))
+    panel_models = best_for_task.get(task_type, best_for_task.get("general", ["mistral-large", "nemotron-super-49b", "gemma-27b"]))
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -561,8 +561,8 @@ def scale(
     else:
         families_seen = set()
         diverse_order = []
-        for alias in ["mistral-large", "llama-3.3", "gemma-27b",
-                      "nemotron-super-49b", "kimi-k2", "llama-405b", "qwen-397b",
+        for alias in ["mistral-large", "nemotron-super-49b", "gemma-27b",
+                      "kimi-k2", "llama-3.3", "qwen-397b", "llama-405b",
                       "jamba-mini", "dracarys-70b",
                       "mistral-medium"]:
             if alias in MODELS:
