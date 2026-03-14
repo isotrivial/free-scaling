@@ -154,14 +154,105 @@ def run_audit(k: int = 3, verbose: bool = False, json_output: bool = False,
     if json_output:
         print(json.dumps({"results": results, "summary": summary}, indent=2))
     else:
-        print(f"\n{'='*50}")
-        print(f"Audit complete: {len(results)} checks, {total_calls} API calls, {elapsed:.0f}s")
-        print(f"k={k} | ", end="")
-        for ans, count in sorted(summary["by_answer"].items()):
-            print(f"{ans}:{count} ", end="")
-        print()
+        print(format_report(results, summary))
     
     return results, summary
+
+
+# Answer classification for the report
+PASS_ANSWERS = {"COMPLIANT", "FOLLOWED", "HEALTHY", "CLEAN", "CONSISTENT", 
+                "EFFICIENT", "RELIABLE", "WITHIN_CAPACITY", "PATCHED", "OK"}
+WARN_ANSWERS = {"DRIFTING", "MINOR_DRIFT", "PARTIALLY", "FLAKY", "UNCLEAR",
+                "WASTEFUL", "OVER_CAPACITY", "HAS_ISSUES"}
+FAIL_ANSWERS = {"VIOLATED", "REPEATING", "FAILING", "INCONSISTENT", "NOT_PATCHED",
+                "DEGRADING", "CRITICAL"}
+
+
+def classify_severity(answer: str) -> str:
+    """Classify an answer into OK/WARNING/CRITICAL."""
+    a = answer.upper()
+    if a in PASS_ANSWERS:
+        return "OK"
+    if a in FAIL_ANSWERS:
+        return "CRITICAL"
+    if a in WARN_ANSWERS:
+        return "WARNING"
+    return "WARNING"  # unknown → warning
+
+
+def format_report(results: list[dict], summary: dict) -> str:
+    """Format a structured audit report."""
+    lines = []
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    
+    lines.append(f"\n{'='*60}")
+    lines.append(f"  SYSTEM AUDIT REPORT")
+    lines.append(f"  {ts} | k={summary['k']} | {summary['total_calls']} API calls | {summary['elapsed_s']:.0f}s | $0")
+    lines.append(f"{'='*60}")
+    
+    # Group by severity
+    ok, warn, crit, err = [], [], [], []
+    for r in results:
+        sev = classify_severity(r["answer"])
+        if r["answer"] == "ERROR":
+            err.append(r)
+        elif sev == "OK":
+            ok.append(r)
+        elif sev == "CRITICAL":
+            crit.append(r)
+        else:
+            warn.append(r)
+    
+    # Critical first
+    if crit:
+        lines.append(f"\n🔴 CRITICAL ({len(crit)})")
+        lines.append("-" * 40)
+        for r in crit:
+            conf = f"{r['confidence']:.0%}" if isinstance(r['confidence'], float) else r['confidence']
+            models = " ".join(f"{m}={a}" for m, a in r.get("models", []))
+            lines.append(f"  [{r['id']}] {r['answer']} ({conf})")
+            if models:
+                lines.append(f"    votes: {models}")
+    
+    if warn:
+        lines.append(f"\n🟡 WARNING ({len(warn)})")
+        lines.append("-" * 40)
+        for r in warn:
+            conf = f"{r['confidence']:.0%}" if isinstance(r['confidence'], float) else r['confidence']
+            models = " ".join(f"{m}={a}" for m, a in r.get("models", []))
+            lines.append(f"  [{r['id']}] {r['answer']} ({conf})")
+            if models:
+                lines.append(f"    votes: {models}")
+    
+    if ok:
+        lines.append(f"\n✅ OK ({len(ok)})")
+        lines.append("-" * 40)
+        for r in ok:
+            conf = f"{r['confidence']:.0%}" if isinstance(r['confidence'], float) else r['confidence']
+            lines.append(f"  [{r['id']}] {r['answer']} ({conf})")
+    
+    if err:
+        lines.append(f"\n❌ ERROR ({len(err)})")
+        lines.append("-" * 40)
+        for r in err:
+            lines.append(f"  [{r['id']}] {r.get('error', 'unknown')}")
+    
+    # Summary bar
+    lines.append(f"\n{'='*60}")
+    total = len(results)
+    lines.append(f"  {total} checks: ✅ {len(ok)} OK | 🟡 {len(warn)} WARNING | 🔴 {len(crit)} CRITICAL | ❌ {len(err)} ERROR")
+    
+    health = len(ok) / total * 100 if total else 0
+    if health >= 80:
+        grade = "HEALTHY"
+    elif health >= 60:
+        grade = "NEEDS ATTENTION"
+    else:
+        grade = "DEGRADED"
+    lines.append(f"  Health: {health:.0f}% — {grade}")
+    lines.append(f"{'='*60}")
+    
+    return "\n".join(lines)
 
 
 def main():
