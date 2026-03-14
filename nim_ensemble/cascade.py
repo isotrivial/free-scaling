@@ -420,35 +420,86 @@ def smart_vote_batch(
     return results
 
 
+def scale_batch(
+    items: list[dict],
+    k: int | str = 3,
+    max_parallel: int = 5,
+) -> list[CascadeResult]:
+    """Batch multiple questions through scale().
+    
+    Each item dict:
+        {"question": "...", "context": "...", "answer_patterns": ["YES", "NO"]}
+    
+    All fields except 'question' are optional.
+    
+    Returns list of CascadeResults in same order as input.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    results = [None] * len(items)
+    
+    def _run_one(idx, item):
+        question = item.get("question", item.get("text", item.get("question_text", "")))
+        return idx, scale(
+            question=question,
+            k=k,
+            context=item.get("context"),
+            answer_patterns=item.get("answer_patterns"),
+            system_prompt=item.get("system_prompt"),
+            max_tokens=item.get("max_tokens", 150),
+            models=item.get("models"),
+        )
+    
+    with ThreadPoolExecutor(max_workers=max_parallel) as pool:
+        futures = {pool.submit(_run_one, i, item): i for i, item in enumerate(items)}
+        for fut in as_completed(futures):
+            idx, result = fut.result()
+            results[idx] = result
+    
+    return results
+
+
 def scale(
     question: str,
     k: int | str = "auto",
+    context: str = None,
     answer_patterns: list[str] = None,
     system_prompt: str = None,
     max_tokens: int = 150,
+    models: list[str] = None,
 ) -> CascadeResult:
     """Scale inference by asking k models the same question.
     
     The core API — control the cost/accuracy tradeoff with a single parameter.
     
     Args:
-        question: The question to answer
+        question: The question to ask (should end with "Answer X or Y")
         k: Number of models to query:
            - "auto": smart cascade (start with 1, escalate on uncertainty)
            - 1: single best model (fastest, cheapest)
            - 3: ensemble of 3 diverse models (balanced)
            - 5: maximum confidence panel
            - Any int: picks that many models from diverse families
+        context: Material to judge against (code, email, transcript, etc.)
+                 Placed in system message so question stays clean.
         answer_patterns: Expected answer tokens (e.g. ["YES", "NO"])
-        system_prompt: Optional system prompt
+        system_prompt: Optional system prompt (overrides context placement)
         max_tokens: Max tokens per call
+        models: Override model selection (list of aliases)
     
     Returns:
         CascadeResult with answer, confidence, calls_made
     """
+    # Build effective system prompt: context goes in system message
+    effective_system = system_prompt
+    if context and not system_prompt:
+        effective_system = f"Here is the material to evaluate:\n\n{context}"
+    elif context and system_prompt:
+        effective_system = f"{system_prompt}\n\nHere is the material to evaluate:\n\n{context}"
+    
     if k == "auto":
         return smart_vote(question, answer_patterns=answer_patterns,
-                         system_prompt=system_prompt, max_tokens=max_tokens)
+                         system_prompt=effective_system, max_tokens=max_tokens)
     
     k = int(k)
     if k < 1:
@@ -456,37 +507,36 @@ def scale(
     
     t0 = time.time()
     
-    # Pick k models — maximize family diversity
-    all_models = list(MODELS.keys())
-    # Sort by family to interleave different architectures
-    families_seen = set()
-    diverse_order = []
-    # First pass: one per family
-    # Order: strongest voters first, then diverse families
-    # Verified working on NIM as of 2026-03-14
-    for alias in ["mistral-large", "llama-3.3", "gemma-27b",
-                  "nemotron-super-49b", "kimi-k2", "llama-405b", "qwen-397b",
-                  "jamba-mini", "dracarys-70b",
-                  "mistral-medium"]:
-        if alias in MODELS:
-            fam = MODELS[alias]["family"]
-            if fam not in families_seen:
-                diverse_order.append(alias)
-                families_seen.add(fam)
-            else:
-                diverse_order.append(alias)  # still add, but after first-of-family
-    
-    # Cap k to available models
-    effective_k = min(k, len(diverse_order))
-    selected = diverse_order[:effective_k]
+    # Use explicit model list if provided, otherwise pick k diverse models
+    if models:
+        selected = models[:k]
+        effective_k = len(selected)
+    else:
+        # Pick k models — maximize family diversity
+        families_seen = set()
+        diverse_order = []
+        # Order: strongest voters first, then diverse families
+        for alias in ["mistral-large", "llama-3.3", "gemma-27b",
+                      "nemotron-super-49b", "kimi-k2", "llama-405b", "qwen-397b",
+                      "jamba-mini", "dracarys-70b",
+                      "mistral-medium"]:
+            if alias in MODELS:
+                fam = MODELS[alias]["family"]
+                if fam not in families_seen:
+                    diverse_order.append(alias)
+                    families_seen.add(fam)
+                else:
+                    diverse_order.append(alias)
+        
+        effective_k = min(k, len(diverse_order))
+        selected = diverse_order[:effective_k]
     
     if k == 1:
-        # Single model — use arbiter
-        model = ARBITER
-        ans, raw = call_model(question, model, system_prompt, max_tokens)
+        model = models[0] if models else ARBITER
+        ans, raw = call_model(question, model, effective_system, max_tokens)
         if answer_patterns:
             answer_patterns = [p.strip().upper() for p in answer_patterns]
-            if answer_patterns and ans != "ERROR":
+            if ans != "ERROR":
                 ans = parse_answer(raw, patterns=answer_patterns)
         
         return CascadeResult(
@@ -509,13 +559,33 @@ def scale(
     calls = 0
     
     from concurrent.futures import ThreadPoolExecutor, as_completed
+    from .health import _mark_dead, _is_dead, _get_substitute
     
     def _call(alias):
-        ans, raw = call_model(question, alias, system_prompt, max_tokens)
-        # Always reparse with answer_patterns when provided
+        # Skip known-dead models, swap in substitute
+        effective_alias = alias
+        if _is_dead(alias):
+            sub = _get_substitute(alias)
+            if sub:
+                effective_alias = sub
+            else:
+                return alias, "ERROR", "Model dead, no substitute"
+        
+        ans, raw = call_model(question, effective_alias, effective_system, max_tokens)
+        
+        # Detect dead models (404/410) and mark for future calls
+        if ans == "ERROR" and raw and any(code in raw for code in ["HTTP 404", "HTTP 410"]):
+            _mark_dead(effective_alias)
+            sub = _get_substitute(effective_alias)
+            if sub:
+                ans, raw = call_model(question, sub, effective_system, max_tokens)
+                if answer_patterns and ans != "ERROR":
+                    ans = parse_answer(raw, patterns=answer_patterns)
+                return sub, ans, raw
+        
         if answer_patterns and ans != "ERROR":
             ans = parse_answer(raw, patterns=answer_patterns)
-        return alias, ans, raw
+        return effective_alias, ans, raw
     
     with ThreadPoolExecutor(max_workers=effective_k) as pool:
         futures = {pool.submit(_call, alias): alias for alias in selected}
@@ -523,7 +593,7 @@ def scale(
             alias, ans, raw = fut.result()
             calls += 1
             if ans != "ERROR":
-                all_votes.append((alias, ans, 1.0))  # Equal weight without profiling
+                all_votes.append((alias, ans, 1.0))
     
     answer, confidence = _weighted_majority(all_votes)
     
@@ -533,7 +603,7 @@ def scale(
         task_type="general",
         stage=f"scale-{effective_k}",
         calls_made=calls,
-        models_used=selected,
+        models_used=[v[0] for v in all_votes],
         votes=all_votes,
         elapsed_s=time.time() - t0,
         reasoning=f"Scaled to {effective_k} models{f' (capped from k={k})' if effective_k < k else ''}: {answer} ({confidence:.0%} agreement).",

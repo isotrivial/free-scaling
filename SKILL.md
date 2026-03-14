@@ -1,6 +1,6 @@
 ---
 name: free-scaling
-version: 2.1.0
+version: 2.1.1
 description: "$0 test-time scaling with NVIDIA NIM free tier. Smart cascade routes questions to the best free model based on measured capability profiles, escalating only on uncertainty. 15 models, 7 capability categories, data-driven panels. Use for auditing, code review, fact-checking, compliance, or any judgment task."
 ---
 
