@@ -17,16 +17,30 @@ Single models hallucinate. Ensembles don't (as much). NIM gives you 15 models fo
 
 ## Setup
 
+### NIM Backend (primary)
 1. Get a free API key at [build.nvidia.com](https://build.nvidia.com) — sign in, pick any model, click "Get API Key"
-2. One key works for all models:
+2. One key works for all 15 models:
    ```bash
    export NVIDIA_API_KEY="nvapi-..."
    ```
-3. Clone and use:
-   ```bash
-   git clone https://github.com/isotrivial/free-scaling.git
-   cd free-scaling
-   ```
+
+### Copilot Backend (optional)
+GitHub Copilot models (cp-4.1, cp-mini, cp-sonnet, etc.) can also be used as voters — useful for hybrid setups where you want smarter models on harder questions and NIM for fast/diverse voting.
+
+```python
+from nim_ensemble import call_copilot
+
+# Requires a Copilot token at ~/.openclaw/credentials/github-copilot.token.json
+ans, raw = call_copilot("Is this safe?", "cp-4.1")
+```
+
+Available Copilot models: `cp-4.1` (GPT-4.1), `cp-mini` (GPT-5-mini), `cp-4o`, `cp-flash`, `cp-haiku`, `cp-sonnet`.
+
+### Clone and use
+```bash
+git clone https://github.com/isotrivial/free-scaling.git
+cd free-scaling
+```
 
 No pip install needed — stdlib only (Python 3.10+).
 
@@ -103,12 +117,31 @@ Generates `capability_map.json` — the cascade loads it automatically to route 
 
 All free via NVIDIA NIM. One API key covers everything.
 
+## Presets
+
+### Audit Preset
+A ready-made behavioral compliance auditor. Collects system state, generates judgment questions, and pipes them through `scale()` with hybrid routing (Copilot for behavioral checks, NIM for operational checks):
+
+```bash
+# Full audit with hybrid backend (default)
+python3 -m presets.audit --backend hybrid -k 3
+
+# NIM-only (no Copilot token needed)
+python3 -m presets.audit --backend nim -k 3
+
+# JSON output for CI pipelines
+python3 -m presets.audit --json
+```
+
+Produces a structured report with severity classification (🔴 CRITICAL / 🟡 WARNING / ✅ OK) and health score.
+
 ## Use Cases
 
 - **Code review** — "Is this code vulnerable?" across multiple models
 - **Fact-checking** — consensus answers to factual questions
 - **Compliance auditing** — check if outputs follow rules/policies
 - **Agent self-evaluation** — verify agent behavior against specs
+- **CI pipelines** — automated judgment gates with JSON output
 - **Any binary/categorical judgment** — scale compute to match stakes
 
 ## Also an OpenClaw Skill
