@@ -23,19 +23,24 @@ Usage:
 
 from .voter import vote, vote_batch, call_model, call_copilot, COPILOT_MODELS, VoteResult
 from .cascade import smart_vote, smart_vote_batch, classify_task, scale, scale_batch, CascadeResult
+from .generate import generate, generate_batch, GenerateResult
 from .models import MODELS, PANELS, get_model, get_panel, list_models, is_thinking
 from .parser import parse_answer, strip_thinking, extract_content
 from .health import health, probe_model
 
 __all__ = [
-    # Core API — the three functions most users need
-    "scale",
-    "scale_batch",
-    "health",
+    # Core API
+    "scale",          # classify: vote on labels
+    "generate",       # generate: best-of-k with cross-eval
+    "scale_batch",    # batch classify
+    "generate_batch", # batch generate
+    "health",         # probe model status
+    # Results
+    "CascadeResult", "GenerateResult", "VoteResult",
     # Cascade (power-user)
-    "smart_vote", "smart_vote_batch", "classify_task", "CascadeResult",
+    "smart_vote", "smart_vote_batch", "classify_task",
     # Flat ensemble
-    "vote", "vote_batch", "call_model", "VoteResult",
+    "vote", "vote_batch", "call_model",
     # Models
     "MODELS", "PANELS", "get_model", "get_panel", "list_models", "is_thinking",
     # Parser
