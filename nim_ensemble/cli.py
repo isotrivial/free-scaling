@@ -6,7 +6,7 @@ import json
 import sys
 import time
 
-from . import vote, vote_batch, call_model, MODELS, PANELS, list_models
+from . import vote, call_model, MODELS, PANELS, list_models
 from . import smart_vote, classify_task, scale
 
 

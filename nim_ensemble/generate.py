@@ -21,7 +21,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
-from .models import MODELS, PANELS
+from .models import MODELS
 from .voter import call_model
 from .health import _is_dead, _get_substitute, _mark_dead
 from .parser import parse_answer

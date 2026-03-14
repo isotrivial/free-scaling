@@ -48,16 +48,41 @@ COPILOT_MODELS = {
 
 
 def _refresh_copilot_token() -> bool:
-    """Try to refresh the Copilot token via OpenClaw gateway."""
+    """Try to refresh the Copilot token via OpenClaw gateway.
+
+    Triggers a gateway call, then polls the token file (up to 5 × 200ms)
+    waiting for expiresAt to update, instead of a blind 1s sleep.
+    """
     import urllib.request
+    token_path = os.path.expanduser("~/.openclaw/credentials/github-copilot.token.json")
+
+    # Snapshot current expiry to detect when it changes
+    old_expires = 0
+    try:
+        with open(token_path) as f:
+            old_expires = json.load(f).get("expiresAt", 0)
+    except Exception:
+        pass
+
     try:
         req = urllib.request.Request("http://localhost:18789/v1/models")
         with urllib.request.urlopen(req, timeout=10) as resp:
             resp.read()
-        time.sleep(1)  # give it a moment to write the new token
-        return True
     except Exception:
         return False
+
+    # Poll for token file update (5 × 200ms = 1s max, same budget as before)
+    for _ in range(5):
+        time.sleep(0.2)
+        try:
+            with open(token_path) as f:
+                if json.load(f).get("expiresAt", 0) != old_expires:
+                    return True
+        except Exception:
+            continue
+
+    # File didn't visibly change — caller will re-read and validate
+    return True
 
 
 def _get_copilot_token() -> str:
@@ -367,11 +392,19 @@ def vote_batch(
     
     with ThreadPoolExecutor(max_workers=parallel_questions) as pool:
         futures = {
-            pool.submit(_vote_one, i, q): i 
+            pool.submit(_vote_one, i, q): i
             for i, q in enumerate(questions)
         }
         for fut in as_completed(futures):
-            idx, result = fut.result()
-            results[idx] = result
-    
+            try:
+                idx, result = fut.result()
+                results[idx] = result
+            except Exception as e:
+                idx = futures[fut]
+                results[idx] = VoteResult(
+                    answer="ERROR", confidence="0/0",
+                    votes=[], raw_responses=[], models_used=[],
+                    errors=[f"Batch item error: {e}"],
+                )
+
     return results

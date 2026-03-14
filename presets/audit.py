@@ -30,18 +30,29 @@ sys.path.insert(0, AUDIT_SCRIPTS)
 
 
 def extract_patterns(question_text: str) -> list[str]:
-    """Extract answer options from 'Answer X, Y, or Z' in question text."""
-    # Match "Answer X, Y, or Z" or "Answer X or Y" — case-insensitive
-    # Use [\w_-]+ to capture hyphenated labels like ON-TRACK
+    """Extract answer options from 'Answer X, Y, ..., or Z' in question text.
+
+    Handles arbitrary number of comma/or-separated options, with optional
+    parenthetical descriptions like 'SAFE (no issues)'.
+    """
+    # Match "Answer <options>" — options are comma/or-separated labels
+    # with optional parenthetical descriptions
     m = re.search(
-        r'[Aa]nswer\s+([\w_-]+)(?:\s*\(.*?\))?'        # first option
-        r'(?:,\s*([\w_-]+)(?:\s*\(.*?\))?)?'             # second (optional)
-        r'(?:,?\s*or\s+([\w_-]+)(?:\s*\(.*?\))?)?',      # third (optional)
+        r'[Aa]nswer\s+'
+        r'([\w_-]+(?:\s*\([^)]*\))?'                           # first option
+        r'(?:(?:,\s*(?:or\s+)?|\s+or\s+)[\w_-]+(?:\s*\([^)]*\))?)*)',  # rest
         question_text
     )
-    if m:
-        return [x.upper() for x in m.groups() if x]
-    return []
+    if not m:
+        return []
+    # Split on comma (with optional trailing "or") or standalone "or"
+    parts = re.split(r',\s*(?:or\s+)?|\s+or\s+', m.group(1))
+    labels = []
+    for part in parts:
+        label = re.match(r'([\w_-]+)', part.strip())
+        if label:
+            labels.append(label.group(1).upper())
+    return labels
 
 
 def collect_state(timeout_per_job: int = 10):
