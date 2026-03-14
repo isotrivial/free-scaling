@@ -11,7 +11,7 @@ Usage:
     # UNSAFE 1.0 1  (resolved at stage 1, no escalation)
 """
 
-from .voter import vote, vote_batch, call_model, VoteResult
+from .voter import vote, vote_batch, call_model, call_copilot, COPILOT_MODELS, VoteResult
 from .cascade import smart_vote, smart_vote_batch, classify_task, scale, CascadeResult
 from .models import MODELS, PANELS, get_model, get_panel, list_models, is_thinking
 from .parser import parse_answer, strip_thinking, extract_content

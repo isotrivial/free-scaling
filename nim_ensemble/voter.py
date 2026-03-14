@@ -35,6 +35,118 @@ def _get_nim_key() -> str:
     return key
 
 
+# Copilot API support
+COPILOT_ENDPOINT = "https://api.individual.githubcopilot.com/chat/completions"
+COPILOT_MODELS = {
+    "cp-4.1": "gpt-4.1",
+    "cp-mini": "gpt-5-mini",
+    "cp-4o": "gpt-4o",
+    "cp-flash": "gemini-3-flash-preview",
+    "cp-haiku": "claude-haiku-4.5",
+    "cp-sonnet": "claude-sonnet-4.5",
+}
+
+
+def _refresh_copilot_token() -> bool:
+    """Try to refresh the Copilot token via OpenClaw gateway."""
+    import subprocess
+    try:
+        # A quick gateway call triggers token refresh
+        subprocess.run(
+            ["curl", "-sf", "http://localhost:18789/v1/models"],
+            capture_output=True, timeout=10
+        )
+        time.sleep(1)  # give it a moment to write the new token
+        return True
+    except Exception:
+        return False
+
+
+def _get_copilot_token() -> str:
+    """Load Copilot session token from cached file, auto-refreshing if expired."""
+    token_path = os.path.expanduser("~/.openclaw/credentials/github-copilot.token.json")
+    if not os.path.exists(token_path):
+        raise RuntimeError(f"Copilot token not found at {token_path}")
+    
+    with open(token_path) as f:
+        data = json.load(f)
+    
+    token = data.get("token", "")
+    expires = data.get("expiresAt", 0) / 1000
+    
+    if time.time() > expires:
+        # Try auto-refresh
+        if _refresh_copilot_token():
+            with open(token_path) as f:
+                data = json.load(f)
+            token = data.get("token", "")
+            expires = data.get("expiresAt", 0) / 1000
+            if time.time() > expires:
+                raise RuntimeError("Copilot token expired — auto-refresh failed")
+        else:
+            raise RuntimeError("Copilot token expired — gateway refresh needed")
+    
+    return token
+
+
+def call_copilot(
+    prompt: str,
+    model_alias: str = "cp-4.1",
+    system_prompt: str = None,
+    max_tokens: int = 300,
+    temperature: float = 0.1,
+) -> tuple[str, str]:
+    """Call a Copilot model. Returns (parsed_answer, raw_content)."""
+    api_model = COPILOT_MODELS.get(model_alias, model_alias)
+    token = _get_copilot_token()
+    
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+    
+    payload = {
+        "model": api_model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
+    
+    try:
+        import urllib.request
+        import urllib.error
+        
+        req_data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            COPILOT_ENDPOINT,
+            data=req_data,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {token}",
+                "Editor-Version": "vscode/1.96.0",
+                "Copilot-Integration-Id": "vscode-chat",
+            },
+        )
+        
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read().decode("utf-8")
+        
+        if not raw or not raw.startswith("{"):
+            return "ERROR", f"Bad response: {(raw or '')[:100]}"
+        
+        data = json.loads(raw)
+        msg = data.get("choices", [{}])[0].get("message", {})
+        content = msg.get("content", "")
+        
+        return parse_answer(content), content
+    
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        return "ERROR", f"HTTP {e.code}: {body[:200]}"
+    except Exception as e:
+        return "ERROR", str(e)
+
+
 def call_model(
     prompt: str,
     model_alias: str,
@@ -117,7 +229,7 @@ def call_model(
 
 def vote(
     question: str,
-    panel: str | list[str] = "balanced",
+    panel: str | list[str] = "general",
     system_prompt: str = None,
     answer_patterns: list[str] = None,
     short_circuit: bool = True,

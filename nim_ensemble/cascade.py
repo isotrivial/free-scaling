@@ -462,10 +462,12 @@ def scale(
     families_seen = set()
     diverse_order = []
     # First pass: one per family
-    for alias in ["mistral-large", "llama-3.3", "qwen-80b", "gemma-27b", 
-                  "kimi-k2", "mistral-nemotron", "llama-405b", "qwen-397b",
-                  "nemotron-super-49b", "jamba-mini", "dracarys-70b",
-                  "deepseek-v3.1-term", "mistral-medium"]:
+    # Order: strongest voters first, then diverse families
+    # Verified working on NIM as of 2026-03-14
+    for alias in ["mistral-large", "llama-3.3", "gemma-27b",
+                  "nemotron-super-49b", "kimi-k2", "llama-405b", "qwen-397b",
+                  "jamba-mini", "dracarys-70b",
+                  "mistral-medium"]:
         if alias in MODELS:
             fam = MODELS[alias]["family"]
             if fam not in families_seen:

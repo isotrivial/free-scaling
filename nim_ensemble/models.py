@@ -19,11 +19,11 @@ MODELS = {
         "params": "27B",
         "thinking": False,
     },
-    "mistral-nemotron": {
-        "id": "mistralai/mistral-nemotron",
+    "nemotron-super-49b": {
+        "id": "nvidia/llama-3.3-nemotron-super-49b-v1",
         "speed": "fast",
-        "family": "mistral",
-        "params": "?",
+        "family": "nvidia",
+        "params": "49B",
         "thinking": False,
     },
     "jamba-mini": {
@@ -70,13 +70,7 @@ MODELS = {
         "params": "397B",
         "thinking": False,
     },
-    "qwen-80b": {
-        "id": "qwen/qwen3-next-80b-a3b-instruct",
-        "speed": "medium",
-        "family": "qwen",
-        "params": "80B",
-        "thinking": False,
-    },
+
     "mistral-medium": {
         "id": "mistralai/mistral-medium-3-instruct",
         "speed": "medium",
@@ -84,14 +78,6 @@ MODELS = {
         "params": "?",
         "thinking": False,
     },
-    "nemotron-super-49b": {
-        "id": "nvidia/llama-3.3-nemotron-super-49b-v1",
-        "speed": "medium",
-        "family": "nvidia",
-        "params": "49B",
-        "thinking": False,
-    },
-
     # Slow tier (3s+)
     "deepseek-v3.1-term": {
         "id": "deepseek-ai/deepseek-v3.1-terminus",
@@ -126,12 +112,12 @@ EXCLUDED = {"phi-4-mini", "phi-3-small", "deepseek-v3.1", "chatglm3-6b", "italia
 # Default panels — diversity-based (mix model families for independent errors).
 # Override with capability_map.json for data-driven routing.
 PANELS = {
-    # General: 3 different families (Mistral/Meta/Qwen)
-    "general": ["mistral-large", "llama-3.3", "qwen-80b"],
+    # General: 3 different families (Mistral/Meta/Google)
+    "general": ["mistral-large", "llama-3.3", "gemma-27b"],
     # Fast: all <1.5s, different families
-    "fast": ["llama-3.3", "mistral-nemotron", "gemma-27b"],
+    "fast": ["llama-3.3", "nemotron-super-49b", "gemma-27b"],
     # Max: 5 models for highest confidence
-    "max": ["mistral-large", "llama-3.3", "qwen-80b", "mistral-nemotron", "gemma-27b"],
+    "max": ["mistral-large", "llama-3.3", "gemma-27b", "nemotron-super-49b", "kimi-k2"],
     # Arbiter: single tiebreaker
     "arbiter": ["mistral-large"],
 }

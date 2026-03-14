@@ -50,9 +50,17 @@ def collect_state(timeout_per_job: int = 10):
 
 
 def run_audit(k: int = 3, verbose: bool = False, json_output: bool = False,
-              state: dict = None, timeout: int = 15):
-    """Run the full audit pipeline through scale(k=)."""
-    from nim_ensemble import scale
+              state: dict = None, timeout: int = 15, backend: str = "hybrid"):
+    """Run the full audit pipeline.
+    
+    Args:
+        k: Number of models per question (NIM mode)
+        backend: "nim" (NIM only), "copilot" (Copilot only), or "hybrid" (auto-route)
+            hybrid: uses Copilot (cp-4.1 + cp-mini) for behavioral/long questions,
+                    NIM scale(k) for short factual/deterministic questions
+    """
+    from nim_ensemble import scale, call_copilot
+    from nim_ensemble.parser import parse_answer
     from questions import generate_questions
     
     t0 = time.time()
@@ -100,32 +108,117 @@ def run_audit(k: int = 3, verbose: bool = False, json_output: bool = False,
         if not patterns:
             patterns = ["COMPLIANT", "DRIFTING", "VIOLATED"]  # default
         
+        # Decide backend for this question
+        category = q.get("category", "")
+        use_copilot = False
+        if backend == "copilot":
+            use_copilot = True
+        elif backend == "hybrid":
+            # Behavioral questions (Q1.x, long context) → Copilot (smarter, 1M context)
+            # Operational/deterministic → NIM (fast, diverse)
+            use_copilot = category in ("behavioral",) or qid.startswith("Q1.")
+        
         try:
-            result = scale(text, k=k, answer_patterns=patterns)
-            total_calls += result.calls_made
+            t1 = time.time()
             
-            models_detail = [(m, a) for m, a, _ in result.votes]
+            if use_copilot:
+                # Copilot voting: cp-4.1 + cp-mini (2 different architectures)
+                # Falls back to NIM if Copilot token is expired
+                copilot_models = ["cp-4.1", "cp-mini"]
+                models_detail = []
+                votes_raw = []
+                copilot_failed = False
+                
+                for cm in copilot_models:
+                    try:
+                        ans, raw = call_copilot(text, cm)
+                    except RuntimeError as e:
+                        if "expired" in str(e).lower():
+                            copilot_failed = True
+                            break
+                        raise
+                    if patterns and ans not in patterns and ans != "ERROR":
+                        ans = parse_answer(raw, patterns=patterns)
+                    models_detail.append((cm, ans))
+                    if ans != "ERROR":
+                        votes_raw.append(ans)
+                    total_calls += 1
+                
+                if copilot_failed:
+                    # Fallback to NIM for this question
+                    if not json_output:
+                        print(f"  [{qid}] copilot expired, falling back to NIM...", flush=True)
+                    result = scale(text, k=k, answer_patterns=patterns)
+                    total_calls += result.calls_made
+                    models_detail = [(m, a) for m, a, _ in result.votes]
+                    dt = time.time() - t1
+                    results.append({
+                        "id": qid,
+                        "category": category,
+                        "answer": result.answer,
+                        "confidence": result.confidence,
+                        "calls": result.calls_made,
+                        "elapsed_s": round(dt, 1),
+                        "source": f"nim-fallback",
+                        "models": models_detail,
+                    })
+                    if not json_output:
+                        ms = ", ".join(f"{m}={a}" for m, a in models_detail)
+                        print(f"  [{qid}] {result.answer} ({result.confidence:.0%}, {dt:.1f}s) [nim-fallback] — {ms}")
+                    continue
+                
+                # Majority from copilot votes
+                if votes_raw:
+                    from collections import Counter
+                    counts = Counter(votes_raw)
+                    answer, count = counts.most_common(1)[0]
+                    confidence = count / len(votes_raw)
+                else:
+                    answer, confidence = "ERROR", 0
+                
+                dt = time.time() - t1
+                results.append({
+                    "id": qid,
+                    "category": category,
+                    "answer": answer,
+                    "confidence": confidence,
+                    "calls": len(copilot_models),
+                    "elapsed_s": round(dt, 1),
+                    "source": "copilot",
+                    "models": models_detail,
+                })
+                
+                if not json_output:
+                    models_str = ", ".join(f"{m}={a}" for m, a in models_detail)
+                    print(f"  [{qid}] {answer} ({confidence:.0%}, {dt:.1f}s) [copilot] — {models_str}")
             
-            results.append({
-                "id": qid,
-                "category": q.get("category", "?"),
-                "answer": result.answer,
-                "confidence": result.confidence,
-                "calls": result.calls_made,
-                "elapsed_s": round(result.elapsed_s, 1),
-                "source": f"scale-{k}",
-                "models": models_detail,
-            })
-            
-            if not json_output:
-                conf_str = f"{result.confidence:.0%}"
-                models_str = ", ".join(f"{m}={a}" for m, a in models_detail)
-                print(f"  [{qid}] {result.answer} ({conf_str}, {result.elapsed_s:.1f}s) — {models_str}")
+            else:
+                # NIM voting via scale(k=)
+                result = scale(text, k=k, answer_patterns=patterns)
+                total_calls += result.calls_made
+                
+                models_detail = [(m, a) for m, a, _ in result.votes]
+                
+                results.append({
+                    "id": qid,
+                    "category": category,
+                    "answer": result.answer,
+                    "confidence": result.confidence,
+                    "calls": result.calls_made,
+                    "elapsed_s": round(result.elapsed_s, 1),
+                    "source": f"scale-{k}",
+                    "models": models_detail,
+                })
+                
+                if not json_output:
+                    conf_str = f"{result.confidence:.0%}"
+                    models_str = ", ".join(f"{m}={a}" for m, a in models_detail)
+                    print(f"  [{qid}] {result.answer} ({conf_str}, {result.elapsed_s:.1f}s) [nim] — {models_str}")
         
         except Exception as e:
             results.append({
                 "id": qid,
-                "category": q.get("category", "?"),
+                "category": category,
                 "answer": "ERROR",
                 "confidence": 0,
                 "calls": 0,
@@ -258,6 +351,9 @@ def format_report(results: list[dict], summary: dict) -> str:
 def main():
     parser = argparse.ArgumentParser(description="Run system audit via scale(k=)")
     parser.add_argument("-k", type=int, default=3, help="Models per question (default 3)")
+    parser.add_argument("--backend", "-b", default="hybrid",
+                        choices=["nim", "copilot", "hybrid"],
+                        help="Backend: nim (NIM only), copilot (Copilot only), hybrid (auto-route, default)")
     parser.add_argument("--json", "-j", action="store_true", help="JSON output")
     parser.add_argument("--verbose", "-v", action="store_true")
     parser.add_argument("--state", help="Path to cached state JSON")
@@ -269,7 +365,8 @@ def main():
             state = json.load(f)
     
     try:
-        run_audit(k=args.k, verbose=args.verbose, json_output=args.json, state=state)
+        run_audit(k=args.k, verbose=args.verbose, json_output=args.json,
+                  state=state, backend=args.backend)
     except KeyboardInterrupt:
         sys.exit(130)
     except RuntimeError as e:
