@@ -76,27 +76,48 @@ TASK_KEYWORDS = {
     ],
 }
 
-# Best model per task type (from capability map data)
-BEST_FOR_TASK = {
+# Default panels — good starting points, override via capability_map.json
+_DEFAULT_BEST_FOR_TASK = {
     "code":       ["qwen-80b", "mistral-large", "mistral-nemotron"],
     "compliance": ["llama-3.3", "qwen-80b", "mistral-large"],
     "reasoning":  ["mistral-large", "llama-3.3", "mistral-nemotron"],
-    "factual":    ["mistral-large", "kimi-k2", "qwen-80b"],
+    "factual":    ["mistral-large", "llama-3.3", "qwen-80b"],
     "nuance":     ["llama-3.3", "qwen-80b", "mistral-large"],
     "general":    ["mistral-large", "llama-3.3", "qwen-80b"],
 }
 
-# Measured accuracy per model per category (from capability_map.json)
-MODEL_WEIGHTS = {
-    "mistral-large":    {"code": 1.0, "compliance": 1.0, "reasoning": 1.0, "factual": 1.0, "nuance": 1.0, "general": 1.0},
-    "llama-3.3":        {"code": 1.0, "compliance": 1.0, "reasoning": 1.0, "factual": 0.78, "nuance": 1.0, "general": 0.96},
-    "qwen-80b":         {"code": 1.0, "compliance": 1.0, "reasoning": 0.67, "factual": 1.0, "nuance": 1.0, "general": 0.95},
-    "mistral-nemotron": {"code": 1.0, "compliance": 0.67, "reasoning": 1.0, "factual": 1.0, "nuance": 1.0, "general": 0.95},
-    "gemma-27b":        {"code": 1.0, "compliance": 0.89, "reasoning": 1.0, "factual": 0.67, "nuance": 0.89, "general": 0.93},
-    "kimi-k2":          {"code": 0.44, "compliance": 0.22, "reasoning": 1.0, "factual": 1.0, "nuance": 1.0, "general": 0.79},
-    "minimax-m2.5":     {"code": 1.0, "compliance": 0.0, "reasoning": 1.0, "factual": 1.0, "nuance": 0.0, "general": 0.8},
-    "qwen-397b":        {"code": 0.0, "compliance": 0.33, "reasoning": 0.67, "factual": 0.67, "nuance": 1.0, "general": 0.58},
-}
+# Default weights (equal) — override via capability_map.json profiling
+_DEFAULT_MODEL_WEIGHT = 0.75
+
+
+def _get_routing():
+    """Load routing from capability_map.json if available, else use defaults."""
+    cap = _load_capability_map()
+    
+    if not cap or "routing_policy" not in cap:
+        return _DEFAULT_BEST_FOR_TASK, {}
+    
+    policy = cap["routing_policy"]
+    
+    # Build BEST_FOR_TASK from routing_policy panels
+    best_for = {}
+    for task_type, models in policy.get("panels", {}).items():
+        best_for[task_type] = models
+    # Merge defaults for any missing task types
+    for k, v in _DEFAULT_BEST_FOR_TASK.items():
+        if k not in best_for:
+            best_for[k] = v
+    
+    # Build MODEL_WEIGHTS from profiles
+    weights = {}
+    for alias, profile in cap.get("profiles", {}).items():
+        cats = profile.get("category_scores", {})
+        weights[alias] = {cat: score for cat, score in cats.items()}
+        # Add overall as "general"
+        if "general" not in weights[alias]:
+            weights[alias]["general"] = profile.get("accuracy", _DEFAULT_MODEL_WEIGHT)
+    
+    return best_for, weights
 
 ARBITER = "mistral-large"  # 100% across all categories
 
@@ -168,13 +189,17 @@ def smart_vote(
     if task_type is None:
         task_type = classify_task(question)
     
+    # Load routing (from capability_map.json if available, else defaults)
+    best_for_task, model_weights = _get_routing()
+    
     if skip_cascade:
         # Fallback: just do weighted panel vote
         return _weighted_panel_vote(question, task_type, answer_patterns, 
-                                    system_prompt, max_tokens, t0)
+                                    system_prompt, max_tokens, t0,
+                                    best_for_task, model_weights)
     
     # Get best model for this task type
-    best_models = BEST_FOR_TASK.get(task_type, BEST_FOR_TASK["general"])
+    best_models = best_for_task.get(task_type, best_for_task["general"])
     primary = best_models[0]
     
     # Stage 1: Primary expert
@@ -184,7 +209,9 @@ def smart_vote(
     if answer_patterns and ans1 not in answer_patterns and ans1 != "ERROR":
         ans1 = parse_answer(raw1, patterns=answer_patterns)
     
-    weight1 = MODEL_WEIGHTS.get(primary, {}).get(task_type, 0.5)
+    # Arbiter gets full weight by default; others get default weight
+    default_w = 1.0 if primary == ARBITER else _DEFAULT_MODEL_WEIGHT
+    weight1 = model_weights.get(primary, {}).get(task_type, default_w)
     calls = 1
     
     if ans1 == "ERROR":
@@ -219,7 +246,7 @@ def smart_vote(
         if answer_patterns and arbiter_ans not in answer_patterns and arbiter_ans != "ERROR":
             arbiter_ans = parse_answer(arbiter_raw, patterns=answer_patterns)
         
-        arbiter_weight = MODEL_WEIGHTS.get(ARBITER, {}).get(task_type, 1.0)
+        arbiter_weight = model_weights.get(ARBITER, {}).get(task_type, _DEFAULT_MODEL_WEIGHT)
     
         # If primary answered and arbiter agrees → done
         if ans1 not in ("ERROR", "UNCLEAR") and arbiter_ans == ans1:
@@ -253,7 +280,7 @@ def smart_vote(
     
     # Stage 3: Disagreement or low confidence → full panel weighted vote
     # Get remaining models from the task panel (excluding already-called)
-    panel_models = BEST_FOR_TASK.get(task_type, BEST_FOR_TASK["general"])
+    panel_models = best_for_task.get(task_type, best_for_task.get("general", _DEFAULT_BEST_FOR_TASK["general"]))
     already_called = {primary, ARBITER} if primary != ARBITER else {primary}
     remaining = [m for m in panel_models if m not in already_called]
     
@@ -276,7 +303,7 @@ def smart_vote(
         calls += 1
         if answer_patterns and ans not in answer_patterns and ans != "ERROR":
             ans = parse_answer(raw, patterns=answer_patterns)
-        w = MODEL_WEIGHTS.get(model, {}).get(task_type, 0.5)
+        w = model_weights.get(model, {}).get(task_type, _DEFAULT_MODEL_WEIGHT)
         if ans != "ERROR":
             all_votes.append((model, ans, w))
     
@@ -320,9 +347,13 @@ def _weighted_majority(votes: list[tuple[str, str, float]]) -> tuple[str, float]
 
 
 def _weighted_panel_vote(question, task_type, answer_patterns, system_prompt, 
-                         max_tokens, t0) -> CascadeResult:
+                         max_tokens, t0, best_for_task=None, model_weights=None) -> CascadeResult:
     """Direct weighted panel vote (skip cascade)."""
-    panel_models = BEST_FOR_TASK.get(task_type, BEST_FOR_TASK["general"])
+    if best_for_task is None:
+        best_for_task, _ = _get_routing()
+    if model_weights is None:
+        _, model_weights = _get_routing()
+    panel_models = best_for_task.get(task_type, best_for_task.get("general", ["mistral-large", "llama-3.3", "qwen-80b"]))
     
     all_votes = []
     calls = 0
@@ -331,7 +362,7 @@ def _weighted_panel_vote(question, task_type, answer_patterns, system_prompt,
         calls += 1
         if answer_patterns and ans not in answer_patterns and ans != "ERROR":
             ans = parse_answer(raw, patterns=answer_patterns)
-        w = MODEL_WEIGHTS.get(model, {}).get(task_type, 0.5)
+        w = model_weights.get(model, {}).get(task_type, _DEFAULT_MODEL_WEIGHT)
         if ans != "ERROR":
             all_votes.append((model, ans, w))
     

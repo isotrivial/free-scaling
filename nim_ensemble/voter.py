@@ -111,7 +111,7 @@ def call_model(
         
         return parse_answer(content), content
     
-    except subprocess.TimeoutExpired:
+    except TimeoutError:
         return "ERROR", f"Timeout after {curl_timeout}s"
     except Exception as e:
         return "ERROR", str(e)

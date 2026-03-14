@@ -67,24 +67,21 @@ Question → classify task type (code/compliance/reasoning/factual/nuance)
 
 Most questions resolve at stage 1. Hallucinating models never get called because the capability map routes around their blind spots.
 
-## Capability Map (measured, not assumed)
+## Capability Profiling
 
-Every model was profiled across 7 categories with multiple trials:
+No hardcoded capability scores — profile models on **your** tasks:
 
-| Model | Accuracy | Latency | Strengths | Blind Spots |
-|-------|----------|---------|-----------|-------------|
-| mistral-large | 100% | 1.0s | All categories | None (arbiter) |
-| llama-3.3 | 96% | 1.9s | nuance, code, agreeableness | factual 78% |
-| qwen-80b | 95% | 0.7s | code, nuance, agreeableness | reasoning 67% |
-| mistral-nemotron | 95% | 1.1s | factual, reasoning, code | agreeableness 67% |
-| gemma-27b | 93% | 1.2s | reasoning, code, agreeableness | factual 67% |
-| kimi-k2 | 79% | 0.6s | instruction, factual, nuance | **agreeableness 22%, code 44%** |
-| qwen-397b | 58% | 4.4s | nuance, calibration | **code 0%, agreeableness 33%** |
+```bash
+# Profile specific models (3 trials each)
+python3 -m nim_ensemble.capability_map --models llama-3.3 qwen-80b mistral-large --trials 3
 
-Key insights:
-- **Size ≠ accuracy**: qwen-397B (58%) < qwen-80B (95%)
-- **Thinking ≠ judgment**: MiniMax M2.5 scores 0% on nuance despite chain-of-thought
-- **Speed ≠ accuracy**: kimi-k2 (0.6s, 79%) vs qwen-80b (0.7s, 95%)
+# Profile all fast models
+python3 -m nim_ensemble.capability_map --speed fast --trials 2
+```
+
+This generates `capability_map.json` with per-model accuracy, latency, strengths/weaknesses, and error correlations. The cascade automatically loads it for data-driven routing.
+
+**Without profiling**, the cascade uses sensible defaults (mistral-large as arbiter, diverse 3-model panels). Profiling lets it route around your models' specific blind spots.
 
 ## Data-Driven Panels
 
@@ -122,18 +119,6 @@ result = vote("Is X true?", panel="general", answer_patterns=["YES", "NO"])
 # Single model call
 from nim_ensemble import call_model
 answer, raw = call_model("Is X true?", "mistral-large")
-```
-
-## Profiling Your Own Models
-
-```bash
-# Profile specific models (3 trials each)
-python3 -m nim_ensemble.capability_map --models llama-3.3 kimi-k2 --trials 3
-
-# Profile all fast models
-python3 -m nim_ensemble.capability_map --speed fast --trials 2
-
-# Output: capability_map.json with profiles + correlation matrix + routing policy
 ```
 
 ## Prompt Tips

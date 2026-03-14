@@ -106,7 +106,74 @@ def factorial(n):
     if n == 0: return 1
     return n * factorial(n - 1)
 ```""",
-     "NO", ["NO"]),  # Correct implementation (no negative handling, but functionally correct for natural numbers)
+     "NO", ["NO"]),  # Correct implementation for natural numbers
+
+    ("code",
+     """Does this function correctly reverse a string? Answer YES or NO.
+```python
+def reverse(s):
+    return s[::-1]
+```""",
+     "YES", ["YES"]),
+
+    ("code",
+     """Is this code vulnerable to path traversal? Answer SAFE or VULNERABLE.
+```python
+filename = request.args.get('file')
+with open(os.path.join('/uploads', filename)) as f:
+    return f.read()
+```""",
+     "VULNERABLE", ["VULNERABLE", "UNSAFE"]),  # ../../../etc/passwd
+
+    ("code",
+     """Does this code have a race condition? Answer YES or NO.
+```python
+if not os.path.exists(filepath):
+    with open(filepath, 'w') as f:
+        f.write(data)
+```""",
+     "YES", ["YES"]),  # TOCTOU race between exists check and open
+
+    ("code",
+     """Is this use of eval safe? Answer SAFE or VULNERABLE.
+```python
+import ast
+result = ast.literal_eval(user_input)
+```""",
+     "SAFE", ["SAFE"]),  # ast.literal_eval is safe, unlike eval()
+
+    ("code",
+     """Does this code correctly check if a number is even? Answer YES or NO.
+```python
+def is_even(n):
+    return n % 2 == 0
+```""",
+     "YES", ["YES"]),
+
+    ("code",
+     """Is there a bug in this binary search? Answer YES or NO.
+```python
+def binary_search(arr, target):
+    lo, hi = 0, len(arr)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if arr[mid] == target:
+            return mid
+        elif arr[mid] < target:
+            lo = mid + 1
+        else:
+            hi = mid
+    return -1
+```""",
+     "NO", ["NO"]),  # Correct half-open interval implementation
+
+    ("code",
+     """Is this password check secure? Answer SECURE or INSECURE.
+```python
+if user_password == "admin123":
+    grant_access()
+```""",
+     "INSECURE", ["INSECURE", "VULNERABLE", "UNSAFE"]),  # Hardcoded password
 
     # === CALIBRATION (should say UNCLEAR) ===
     ("calibration",
