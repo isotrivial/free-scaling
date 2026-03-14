@@ -40,7 +40,9 @@ __all__ = [
     # Cascade (power-user)
     "smart_vote", "smart_vote_batch", "classify_task",
     # Flat ensemble
-    "vote", "vote_batch", "call_model",
+    "vote", "vote_batch", "call_model", "call_copilot",
+    # Copilot
+    "COPILOT_MODELS",
     # Models
     "MODELS", "PANELS", "get_model", "get_panel", "list_models", "is_thinking",
     # Parser

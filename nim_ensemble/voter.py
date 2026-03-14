@@ -152,7 +152,10 @@ def call_model(
     max_tokens: int = 150,
     temperature: float = 0.1,
 ) -> tuple[str, str]:
-    """Call a single NIM model. Returns (parsed_answer, raw_content)."""
+    """Call a single model. Routes Copilot aliases (cp-*) automatically."""
+    # Route Copilot models to call_copilot()
+    if model_alias in COPILOT_MODELS:
+        return call_copilot(prompt, model_alias, system_prompt, max_tokens, temperature)
     model_info = get_model(model_alias)
     api_model = model_info["id"]
     key = _get_nim_key()
@@ -298,6 +301,7 @@ def vote(
         # Sequential execution with optional short-circuit
         for i, alias in enumerate(model_aliases):
             _, ans, raw = _call(alias)
+            models_used_ordered.append(alias)
             votes.append(ans)
             raw_responses.append(raw)
             if ans == "ERROR":

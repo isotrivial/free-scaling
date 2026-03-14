@@ -106,9 +106,6 @@ MODELS = {
     },
 }
 
-# Models that give false passes — excluded from default panels
-EXCLUDED = {"phi-4-mini", "phi-3-small", "deepseek-v3.1", "chatglm3-6b", "italia-10b"}
-
 # Default panels — diversity-based (mix model families for independent errors).
 # Override with capability_map.json for data-driven routing.
 PANELS = {

@@ -354,34 +354,43 @@ def _weighted_majority(votes: list[tuple[str, str, float]]) -> tuple[str, float]
     return best_answer, round(confidence, 3)
 
 
-def _weighted_panel_vote(question, task_type, answer_patterns, system_prompt, 
+def _weighted_panel_vote(question, task_type, answer_patterns, system_prompt,
                          max_tokens, t0, best_for_task=None, model_weights=None) -> CascadeResult:
     """Direct weighted panel vote (skip cascade)."""
-    if best_for_task is None:
-        best_for_task, _ = _get_routing()
-    if model_weights is None:
-        _, model_weights = _get_routing()
+    if best_for_task is None or model_weights is None:
+        bft, mw = _get_routing()
+        if best_for_task is None:
+            best_for_task = bft
+        if model_weights is None:
+            model_weights = mw
     panel_models = best_for_task.get(task_type, best_for_task.get("general", ["mistral-large", "llama-3.3", "gemma-27b"]))
-    
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     all_votes = []
-    calls = 0
-    for model in panel_models:
+
+    def _call(model):
         ans, raw = call_model(question, model, system_prompt, max_tokens)
-        calls += 1
         if answer_patterns and ans != "ERROR":
             ans = parse_answer(raw, patterns=answer_patterns)
         w = model_weights.get(model, {}).get(task_type, _DEFAULT_MODEL_WEIGHT)
-        if ans != "ERROR":
-            all_votes.append((model, ans, w))
-    
+        return model, ans, w
+
+    with ThreadPoolExecutor(max_workers=len(panel_models)) as pool:
+        futures = {pool.submit(_call, m): m for m in panel_models}
+        for fut in as_completed(futures):
+            model, ans, w = fut.result()
+            if ans != "ERROR":
+                all_votes.append((model, ans, w))
+
     answer, confidence = _weighted_majority(all_votes)
-    
+
     return CascadeResult(
         answer=answer,
         confidence=confidence,
         task_type=task_type,
         stage="panel",
-        calls_made=calls,
+        calls_made=len(panel_models),
         models_used=panel_models,
         votes=all_votes,
         elapsed_s=time.time() - t0,
@@ -506,6 +515,10 @@ def scale(
     elif context and system_prompt:
         effective_system = f"{system_prompt}\n\nHere is the material to evaluate:\n\n{context}"
     
+    # Normalize answer patterns once at entry
+    if answer_patterns:
+        answer_patterns = [p.strip().upper() for p in answer_patterns]
+
     if k == "auto":
         return smart_vote(question, answer_patterns=answer_patterns,
                          system_prompt=effective_system, max_tokens=max_tokens)
@@ -515,16 +528,39 @@ def scale(
         raise ValueError("k must be >= 1 or 'auto'")
     
     t0 = time.time()
-    
-    # Use explicit model list if provided, otherwise pick k diverse models
+
+    # k=1: single best model — use task-type routing
+    if k == 1:
+        if models:
+            model = models[0]
+            task_type = "general"
+        else:
+            task_type = classify_task(question)
+            best_for_task, _ = _get_routing()
+            model = best_for_task.get(task_type, best_for_task["general"])[0]
+        ans, raw = call_model(question, model, effective_system, max_tokens)
+        if answer_patterns and ans != "ERROR":
+            ans = parse_answer(raw, patterns=answer_patterns)
+
+        return CascadeResult(
+            answer=ans,
+            confidence=1.0 if ans != "ERROR" else 0.0,
+            task_type=task_type,
+            stage="primary",
+            calls_made=1,
+            models_used=[model],
+            votes=[(model, ans, 1.0)],
+            elapsed_s=time.time() - t0,
+            reasoning=f"Single model ({model}): {ans}",
+        )
+
+    # k >= 2: pick diverse models
     if models:
         selected = models[:k]
         effective_k = len(selected)
     else:
-        # Pick k models — maximize family diversity
         families_seen = set()
         diverse_order = []
-        # Order: strongest voters first, then diverse families
         for alias in ["mistral-large", "llama-3.3", "gemma-27b",
                       "nemotron-super-49b", "kimi-k2", "llama-405b", "qwen-397b",
                       "jamba-mini", "dracarys-70b",
@@ -536,34 +572,11 @@ def scale(
                     families_seen.add(fam)
                 else:
                     diverse_order.append(alias)
-        
+
         effective_k = min(k, len(diverse_order))
         selected = diverse_order[:effective_k]
     
-    if k == 1:
-        model = models[0] if models else ARBITER
-        ans, raw = call_model(question, model, effective_system, max_tokens)
-        if answer_patterns:
-            answer_patterns = [p.strip().upper() for p in answer_patterns]
-            if ans != "ERROR":
-                ans = parse_answer(raw, patterns=answer_patterns)
-        
-        return CascadeResult(
-            answer=ans,
-            confidence=1.0 if ans != "ERROR" else 0.0,
-            task_type="general",
-            stage="primary",
-            calls_made=1,
-            models_used=[model],
-            votes=[(model, ans, 1.0)],
-            elapsed_s=time.time() - t0,
-            reasoning=f"Single model ({model}): {ans}",
-        )
-    
-    # k >= 2: parallel ensemble vote
-    if answer_patterns:
-        answer_patterns = [p.strip().upper() for p in answer_patterns]
-    
+    # Parallel ensemble vote
     all_votes = []
     calls = 0
     
