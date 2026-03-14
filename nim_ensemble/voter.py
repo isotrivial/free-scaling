@@ -269,7 +269,7 @@ def vote(
     def _call(alias):
         ans, raw = call_model(question, alias, system_prompt, max_tokens)
         # Re-parse with custom patterns if provided
-        if answer_patterns and ans not in answer_patterns and ans != "ERROR":
+        if answer_patterns and ans != "ERROR":
             ans = parse_answer(raw, patterns=answer_patterns)
         return alias, ans, raw
     

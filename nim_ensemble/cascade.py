@@ -214,7 +214,7 @@ def smart_vote(
     ans1, raw1 = call_model(question, primary, system_prompt, max_tokens)
     
     # Re-parse with custom patterns
-    if answer_patterns and ans1 not in answer_patterns and ans1 != "ERROR":
+    if answer_patterns and ans1 != "ERROR":
         ans1 = parse_answer(raw1, patterns=answer_patterns)
     
     # Arbiter gets full weight by default; others get default weight
@@ -251,7 +251,7 @@ def smart_vote(
         arbiter_ans, arbiter_raw = call_model(question, ARBITER, system_prompt, max_tokens)
         calls += 1
         
-        if answer_patterns and arbiter_ans not in answer_patterns and arbiter_ans != "ERROR":
+        if answer_patterns and arbiter_ans != "ERROR":
             arbiter_ans = parse_answer(arbiter_raw, patterns=answer_patterns)
         
         arbiter_weight = model_weights.get(ARBITER, {}).get(task_type, 1.0)  # Arbiter gets full weight by default
@@ -309,7 +309,7 @@ def smart_vote(
     for model in remaining:
         ans, raw = call_model(question, model, system_prompt, max_tokens)
         calls += 1
-        if answer_patterns and ans not in answer_patterns and ans != "ERROR":
+        if answer_patterns and ans != "ERROR":
             ans = parse_answer(raw, patterns=answer_patterns)
         w = model_weights.get(model, {}).get(task_type, _DEFAULT_MODEL_WEIGHT)
         if ans != "ERROR":
@@ -368,7 +368,7 @@ def _weighted_panel_vote(question, task_type, answer_patterns, system_prompt,
     for model in panel_models:
         ans, raw = call_model(question, model, system_prompt, max_tokens)
         calls += 1
-        if answer_patterns and ans not in answer_patterns and ans != "ERROR":
+        if answer_patterns and ans != "ERROR":
             ans = parse_answer(raw, patterns=answer_patterns)
         w = model_weights.get(model, {}).get(task_type, _DEFAULT_MODEL_WEIGHT)
         if ans != "ERROR":
@@ -486,7 +486,7 @@ def scale(
         ans, raw = call_model(question, model, system_prompt, max_tokens)
         if answer_patterns:
             answer_patterns = [p.strip().upper() for p in answer_patterns]
-            if ans not in answer_patterns and ans != "ERROR":
+            if answer_patterns and ans != "ERROR":
                 ans = parse_answer(raw, patterns=answer_patterns)
         
         return CascadeResult(
@@ -512,7 +512,8 @@ def scale(
     
     def _call(alias):
         ans, raw = call_model(question, alias, system_prompt, max_tokens)
-        if answer_patterns and ans not in answer_patterns and ans != "ERROR":
+        # Always reparse with answer_patterns when provided
+        if answer_patterns and ans != "ERROR":
             ans = parse_answer(raw, patterns=answer_patterns)
         return alias, ans, raw
     
