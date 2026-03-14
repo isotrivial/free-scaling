@@ -92,16 +92,18 @@ def parse_answer(raw_response: str, patterns: list[str] = None) -> str:
             return pattern
     
     # Second pass: match anywhere as whole word, but reject negated matches
-    negation_prefixes = {"NOT ", "NO ", "ISN'T ", "AREN'T ", "NOT_"}
+    # Catches: "NOT SAFE", "not at all SAFE", "not really COMPLIANT", "ISN'T SAFE"
+    _NEGATION_RE = re.compile(
+        r'\b(?:NOT|NO|ISN\'T|AREN\'T|DOESN\'T|DON\'T|NEVER|NEITHER|NOR)'
+        r'(?:\s+\w+){0,3}\s*$'  # up to 3 intervening words before the match
+    )
     for pattern in search_patterns:
         escaped = re.escape(pattern)
         match = re.search(rf'\b{escaped}\b', first_line_clean)
         if match:
-            # Check if preceded by a negation
-            start = match.start()
-            prefix = first_line_clean[:start].rstrip()
-            negated = any(prefix.endswith(neg.rstrip()) for neg in negation_prefixes)
-            if not negated:
+            # Check if preceded by a negation (with up to 3 words gap)
+            prefix = first_line_clean[:match.start()].rstrip()
+            if not _NEGATION_RE.search(prefix):
                 return pattern
     
     return "UNCLEAR"

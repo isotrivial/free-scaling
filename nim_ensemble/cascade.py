@@ -78,12 +78,12 @@ TASK_KEYWORDS = {
 
 # Default panels — good starting points, override via capability_map.json
 _DEFAULT_BEST_FOR_TASK = {
-    "code":       ["qwen-80b", "mistral-large", "mistral-nemotron"],
-    "compliance": ["llama-3.3", "qwen-80b", "mistral-large"],
-    "reasoning":  ["mistral-large", "llama-3.3", "mistral-nemotron"],
-    "factual":    ["mistral-large", "llama-3.3", "qwen-80b"],
-    "nuance":     ["llama-3.3", "qwen-80b", "mistral-large"],
-    "general":    ["mistral-large", "llama-3.3", "qwen-80b"],
+    "code":       ["gemma-27b", "mistral-large", "llama-3.3"],
+    "compliance": ["llama-3.3", "gemma-27b", "mistral-large"],
+    "reasoning":  ["mistral-large", "llama-3.3", "nemotron-super-49b"],
+    "factual":    ["mistral-large", "llama-3.3", "gemma-27b"],
+    "nuance":     ["llama-3.3", "gemma-27b", "mistral-large"],
+    "general":    ["mistral-large", "llama-3.3", "gemma-27b"],
 }
 
 # Default weights (equal) — override via capability_map.json profiling
@@ -294,7 +294,7 @@ def smart_vote(
     
     # Add more models if panel is too small
     if len(remaining) < 2:
-        backup = [m for m in ["llama-3.3", "qwen-80b", "gemma-27b", "mistral-nemotron"] 
+        backup = [m for m in ["llama-3.3", "gemma-27b", "nemotron-super-49b", "kimi-k2"] 
                   if m not in already_called and m not in remaining]
         remaining.extend(backup[:3 - len(remaining)])
     
@@ -361,7 +361,7 @@ def _weighted_panel_vote(question, task_type, answer_patterns, system_prompt,
         best_for_task, _ = _get_routing()
     if model_weights is None:
         _, model_weights = _get_routing()
-    panel_models = best_for_task.get(task_type, best_for_task.get("general", ["mistral-large", "llama-3.3", "qwen-80b"]))
+    panel_models = best_for_task.get(task_type, best_for_task.get("general", ["mistral-large", "llama-3.3", "gemma-27b"]))
     
     all_votes = []
     calls = 0
@@ -476,7 +476,9 @@ def scale(
             else:
                 diverse_order.append(alias)  # still add, but after first-of-family
     
-    selected = diverse_order[:k]
+    # Cap k to available models
+    effective_k = min(k, len(diverse_order))
+    selected = diverse_order[:effective_k]
     
     if k == 1:
         # Single model — use arbiter
@@ -514,7 +516,7 @@ def scale(
             ans = parse_answer(raw, patterns=answer_patterns)
         return alias, ans, raw
     
-    with ThreadPoolExecutor(max_workers=k) as pool:
+    with ThreadPoolExecutor(max_workers=effective_k) as pool:
         futures = {pool.submit(_call, alias): alias for alias in selected}
         for fut in as_completed(futures):
             alias, ans, raw = fut.result()
@@ -528,10 +530,10 @@ def scale(
         answer=answer,
         confidence=confidence,
         task_type="general",
-        stage=f"scale-{k}",
+        stage=f"scale-{effective_k}",
         calls_made=calls,
         models_used=selected,
         votes=all_votes,
         elapsed_s=time.time() - t0,
-        reasoning=f"Scaled to {k} models: {answer} ({confidence:.0%} agreement).",
+        reasoning=f"Scaled to {effective_k} models{f' (capped from k={k})' if effective_k < k else ''}: {answer} ({confidence:.0%} agreement).",
     )

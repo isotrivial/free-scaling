@@ -88,7 +88,7 @@ Most questions resolve with 1-2 calls. Scales up only when needed.
 Default panels are diversity-based. For data-driven routing, profile models on your tasks:
 
 ```bash
-python3 -m nim_ensemble.capability_map --models llama-3.3 qwen-80b mistral-large --trials 3
+python3 -m nim_ensemble.capability_map --models llama-3.3 gemma-27b mistral-large --trials 3
 ```
 
 Generates `capability_map.json` — the cascade loads it automatically to route around each model's measured blind spots.
@@ -97,8 +97,8 @@ Generates `capability_map.json` — the cascade loads it automatically to route 
 
 | Tier | Models |
 |------|--------|
-| Fast (<1s) | llama-3.3 70B, gemma-27b, mistral-nemotron, dracarys-70b, jamba-mini |
-| Medium (1-3s) | mistral-large 675B, kimi-k2, qwen-80b, qwen-397b, llama-405b, mistral-medium, nemotron-super-49b |
+| Fast (<1s) | llama-3.3 70B, gemma-27b, nemotron-super-49b, dracarys-70b, jamba-mini |
+| Medium (1-3s) | mistral-large 675B, kimi-k2, qwen-397b, llama-405b, mistral-medium |
 | Slow (3s+) | deepseek-v3.1, minimax-m2.5 🧠, kimi-k2.5 🧠 |
 
 All free via NVIDIA NIM. One API key covers everything.

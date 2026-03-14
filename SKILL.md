@@ -75,7 +75,7 @@ No hardcoded capability scores — profile models on **your** tasks:
 
 ```bash
 # Profile specific models (3 trials each)
-python3 -m nim_ensemble.capability_map --models llama-3.3 qwen-80b mistral-large --trials 3
+python3 -m nim_ensemble.capability_map --models llama-3.3 gemma-27b mistral-large --trials 3
 
 # Profile all fast models
 python3 -m nim_ensemble.capability_map --speed fast --trials 2
@@ -91,8 +91,8 @@ Panels maximize architectural diversity (independent errors cancel out):
 
 | Panel | Models | Use Case |
 |-------|--------|----------|
-| `general` | mistral-large, llama-3.3, qwen-80b | Default (3 families) |
-| `fast` | llama-3.3, mistral-nemotron, gemma-27b | All <1.5s |
+| `general` | mistral-large, llama-3.3, gemma-27b | Default (3 families) |
+| `fast` | llama-3.3, nemotron-super-49b, gemma-27b | All <1.5s |
 | `max` | 5 models across 5 families | High-stakes |
 | `arbiter` | mistral-large | Single tiebreaker |
 

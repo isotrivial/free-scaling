@@ -31,11 +31,12 @@ sys.path.insert(0, AUDIT_SCRIPTS)
 
 def extract_patterns(question_text: str) -> list[str]:
     """Extract answer options from 'Answer X, Y, or Z' in question text."""
-    # Match "Answer X, Y, or Z" or "Answer X or Y"
+    # Match "Answer X, Y, or Z" or "Answer X or Y" — case-insensitive
+    # Use [\w_-]+ to capture hyphenated labels like ON-TRACK
     m = re.search(
-        r'Answer\s+([\w_]+)(?:\s*\(.*?\))?'        # first option
-        r'(?:,\s*([\w_]+)(?:\s*\(.*?\))?)?'          # second (optional)
-        r'(?:,?\s*or\s+([\w_]+)(?:\s*\(.*?\))?)?',   # third (optional)
+        r'[Aa]nswer\s+([\w_-]+)(?:\s*\(.*?\))?'        # first option
+        r'(?:,\s*([\w_-]+)(?:\s*\(.*?\))?)?'             # second (optional)
+        r'(?:,?\s*or\s+([\w_-]+)(?:\s*\(.*?\))?)?',      # third (optional)
         question_text
     )
     if m:
@@ -132,16 +133,17 @@ def run_audit(k: int = 3, verbose: bool = False, json_output: bool = False,
                 for cm in copilot_models:
                     try:
                         ans, raw = call_copilot(text, cm)
-                    except RuntimeError as e:
-                        if "expired" in str(e).lower():
-                            copilot_failed = True
-                            break
-                        raise
-                    if patterns and ans not in patterns and ans != "ERROR":
+                    except (RuntimeError, Exception) as e:
+                        # Any Copilot failure → fall back to NIM
+                        copilot_failed = True
+                        break
+                    if ans == "ERROR":
+                        copilot_failed = True
+                        break
+                    if patterns and ans not in patterns:
                         ans = parse_answer(raw, patterns=patterns)
                     models_detail.append((cm, ans))
-                    if ans != "ERROR":
-                        votes_raw.append(ans)
+                    votes_raw.append(ans)
                     total_calls += 1
                 
                 if copilot_failed:
