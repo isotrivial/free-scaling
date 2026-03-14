@@ -1,148 +1,158 @@
 ---
 name: free-scaling
-version: 3.0.0
-description: "$0 test-time scaling with NVIDIA NIM free tier. Smart cascade routes questions to the best free model based on measured capability profiles, escalating only on uncertainty. 15 models, 7 capability categories, data-driven panels. Use for auditing, code review, fact-checking, compliance, or any judgment task."
+version: 3.2.0
+description: "$0 test-time scaling infrastructure. Classify, generate, and verify using free model ensembles. 13 NIM models + optional Copilot backend. Auto-heals when models die."
 ---
 
-# NIM Ensemble
+# Free Scaling
 
-$0 multi-model reasoning using NVIDIA NIM free tier. Two modes:
+$0 test-time scaling infrastructure using NVIDIA NIM free tier.
 
-- **`smart_vote()`** — cascade: routes to the best expert for the task type, escalates only on uncertainty. Average 1.2 API calls per question.
-- **`vote()`** — flat ensemble: asks N models, majority vote. Simple but uses more calls.
+Three patterns, one API key:
+
+```python
+from free_scaling import scale, generate, health
+
+# Classify — vote on labels
+result = scale("Is this safe?", context=code, k=3,
+               answer_patterns=["SAFE", "VULNERABLE"])
+
+# Generate — best-of-k with cross-evaluation
+result = generate("Summarize this paper.", context=paper, k=3)
+
+# Verify — just scale() with source+output as context
+check = scale("Any hallucinated claims?",
+              context=f"Source:\n{src}\n\nOutput:\n{draft}",
+              k=3, answer_patterns=["YES", "NO"])
+```
 
 ## Setup
 
-1. Go to [build.nvidia.com](https://build.nvidia.com) and sign in (free NVIDIA account)
-2. Pick any model (e.g. [Llama 3.3 70B](https://build.nvidia.com/meta/llama-3_3-70b-instruct)) and click **"Get API Key"**
-3. One key works for all NIM models — no per-model setup needed
-4. Set it in your environment:
-   ```bash
-   export NVIDIA_API_KEY="nvapi-..."
-   ```
-5. No pip dependencies — stdlib only (Python 3.10+)
+1. Get a free API key at [build.nvidia.com](https://build.nvidia.com)
+2. `export NVIDIA_API_KEY="nvapi-..."`
+3. No pip install — stdlib only (Python 3.10+)
 
-## Quick Start
+## Core API
+
+### `scale(question, context, k, answer_patterns)` → CascadeResult
+
+Classification via ensemble voting. Ask k models, majority wins.
 
 ```python
-from nim_ensemble import scale
-
-# k=3: ask 3 diverse models, majority vote
-result = scale("Is eval(input()) safe?", k=3, answer_patterns=["SAFE", "VULNERABLE"])
-print(result.answer)      # VULNERABLE
-print(result.calls_made)  # 3
-print(result.confidence)  # 1.0
-
-# k="auto": smart cascade (starts with 1, escalates on uncertainty)
-result = scale("Is this correct?", k="auto", answer_patterns=["YES", "NO"])
+result = scale(
+    "Is this email urgent? Answer URGENT, NORMAL, or IGNORE.",
+    context=email_body,
+    k=3,
+    answer_patterns=["URGENT", "NORMAL", "IGNORE"]
+)
+result.answer       # "NORMAL"
+result.confidence   # 1.0
+result.calls_made   # 3
+result.elapsed_s    # 1.8
 ```
+
+**Parameters:**
+- `question` — what to judge (should end with "Answer X or Y")
+- `context` — material to evaluate (placed in system message)
+- `k` — models to query: 1, 3, 5, or `"auto"` (smart cascade)
+- `answer_patterns` — expected answers (e.g. `["YES", "NO"]`)
+- `models` — override model selection (list of aliases)
+
+### `generate(question, context, k)` → GenerateResult
+
+Best-of-k generation with cross-evaluation. Round 1: k models generate. Round 2: k different models judge which is best.
+
+```python
+result = generate(
+    "Summarize this email in 2 sentences.",
+    context=email_text,
+    k=3,
+    max_tokens=200,
+)
+result.output          # winning summary
+result.all_outputs     # all 3 summaries
+result.winner_model    # "llama-3.3"
+result.judge_votes     # ["2", "2", "2"]
+result.total_calls     # 6 (3 gen + 3 judge)
+```
+
+### `scale_batch(items, k)` / `generate_batch(items, k)`
+
+Parallel batch versions. Each item is a dict with `question`, `context`, `answer_patterns`.
+
+```python
+results = scale_batch([
+    {"question": "Urgent?", "context": e, "answer_patterns": ["YES", "NO"]}
+    for e in emails
+], k=3)
+```
+
+### `health(models=None)` → dict
+
+Probe models. Returns status per model (ok/dead/slow/error + latency).
+
+```python
+status = health()  # all models
+status = health(models=["llama-3.3", "gemma-27b"])  # specific
+```
+
+Dead models are auto-skipped in subsequent calls and retried after 5 minutes.
+
+## Smart Features
+
+- **Auto-heal**: 404/410 models get marked dead, substituted with same-tier alternatives, retried after 5min TTL
+- **Context routing**: `context` goes in system message, `question` stays in user message
+- **Parallel short-circuit**: submits all k models in parallel, cancels remaining when first 2 agree
+- **Task classification**: `k="auto"` classifies the question type and routes to the best expert
+- **Copilot integration**: `cp-*` aliases route automatically through GitHub Copilot API
+- **Error isolation**: batch functions catch per-item failures without killing the batch
+
+## 13 Models Included
+
+| Tier | Models | Latency |
+|------|--------|---------|
+| Fast | llama-3.3 70B, gemma-27b, nemotron-super-49b, dracarys-70b, jamba-mini | <1s |
+| Medium | mistral-large 675B, kimi-k2, qwen-397b, llama-405b, mistral-medium | 1-3s |
+| Thinking | deepseek-v3.1, minimax-m2.5 🧠, kimi-k2.5 🧠 | 3s+ |
+
+All free via NVIDIA NIM. One API key covers everything.
 
 ## CLI
 
 ```bash
-# Scale to k models
-python3 -m nim_ensemble.cli scale "Is this code vulnerable?" -k 3 --answers "SAFE,VULNERABLE"
-# → VULNERABLE (k=3, conf=100%, 3 calls, 1.2s)
-
-# Single model (fastest)
-python3 -m nim_ensemble.cli scale "Is 91 prime?" -k 1 --answers "YES,NO"
-
-# Auto-scale (smart cascade)
-python3 -m nim_ensemble.cli scale "Is this safe?" -k auto
-
-# List models and panels
-python3 -m nim_ensemble.cli models
-python3 -m nim_ensemble.cli panels
-
-# Benchmark all models on a question
-python3 -m nim_ensemble.cli bench "Is 91 prime? YES or NO." --speed fast
+python3 -m nim_ensemble.cli scale "Is this safe?" -k 3 --answers "SAFE,VULNERABLE"
+python3 -m nim_ensemble.cli models     # list available models
+python3 -m nim_ensemble.cli panels     # list panels
 ```
 
-## How Smart Cascade Works
+## Capability Profiling (optional)
 
-```
-Question → classify task type (code/compliance/reasoning/factual/nuance)
-        → call best expert for that type (1 call)
-        → confident? (weight ≥ 85%) → done
-        → uncertain? → call arbiter (mistral-large, 100% all categories)
-        → still split? → full panel, weighted vote by measured accuracy
-```
-
-Most questions resolve at stage 1. Hallucinating models never get called because the capability map routes around their blind spots.
-
-## Capability Profiling
-
-No hardcoded capability scores — profile models on **your** tasks:
+Profile models on your tasks for data-driven routing:
 
 ```bash
-# Profile specific models (3 trials each)
 python3 -m nim_ensemble.capability_map --models llama-3.3 gemma-27b mistral-large --trials 3
-
-# Profile all fast models
-python3 -m nim_ensemble.capability_map --speed fast --trials 2
 ```
 
-This generates `capability_map.json` with per-model accuracy, latency, strengths/weaknesses, and error correlations. The cascade automatically loads it for data-driven routing.
-
-**Without profiling**, the cascade uses sensible defaults (mistral-large as arbiter, diverse 3-model panels). Profiling lets it route around your models' specific blind spots.
-
-## Default Panels
-
-Panels maximize architectural diversity (independent errors cancel out):
-
-| Panel | Models | Use Case |
-|-------|--------|----------|
-| `general` | mistral-large, llama-3.3, gemma-27b | Default (3 families) |
-| `fast` | llama-3.3, nemotron-super-49b, gemma-27b | All <1.5s |
-| `max` | 5 models across 5 families | High-stakes |
-| `arbiter` | mistral-large | Single tiebreaker |
-
-For task-specific panels, run `capability_map` to profile models on your data.
-
-## Python API
-
-```python
-from nim_ensemble import scale, smart_vote, vote, call_model
-
-# scale() — the core API, control k
-result = scale("Is X safe?", k=3, answer_patterns=["SAFE", "VULNERABLE"])
-result = scale("Is X safe?", k="auto")  # smart cascade
-result = scale("Is X safe?", k=1)       # single model
-
-# smart_vote() — cascade with task-type routing
-result = smart_vote("Is X correct?", answer_patterns=["YES", "NO"])
-
-# vote() — flat ensemble with named panels
-result = vote("Is X true?", panel="general", answer_patterns=["YES", "NO"])
-
-# call_model() — single model, raw access
-from nim_ensemble import call_model
-answer, raw = call_model("Is X true?", "mistral-large")
-```
-
-## Prompt Tips
-
-For best results with ensemble voting:
-- Ask for the answer on the **first line**: "Answer YES or NO on the first line, then explain."
-- Give **explicit answer options**: "Answer SAFE, UNSAFE, or NEEDS_REVIEW."
-- Include **context/evidence** in the question, not just the judgment call.
+Generates `capability_map.json` — the cascade loads it automatically.
 
 ## Architecture
 
 ```
 nim_ensemble/
-├── __init__.py       # Public API: smart_vote, vote, call_model
-├── cascade.py        # Smart cascade with capability routing
-├── voter.py          # Flat ensemble voting engine
-├── models.py         # Model registry + data-driven panels
-├── parser.py         # Answer extraction (thinking models, word boundaries)
+├── __init__.py       # Exports: scale, generate, health, scale_batch, generate_batch
+├── cascade.py        # scale(), scale_batch(), smart cascade
+├── generate.py       # generate(), generate_batch(), best-of-k
+├── voter.py          # Core voting engine, NIM + Copilot backends
+├── health.py         # Model probing, dead-model tracking, substitution
+├── models.py         # Model registry, panels
+├── parser.py         # Answer extraction (thinking models, negation, word boundaries)
 ├── cli.py            # CLI interface
-├── benchmark.py      # Single-trial model profiling
+├── benchmark.py      # Single-trial profiling
 └── capability_map.py # Multi-trial profiling with error correlation
 ```
 
 ## Requirements
 
-- `NVIDIA_API_KEY` environment variable (free at [build.nvidia.com](https://build.nvidia.com))
-- Python 3.10+
-- No pip dependencies (stdlib only, uses `urllib` for API calls)
+- `NVIDIA_API_KEY` environment variable (free at build.nvidia.com)
+- Python 3.10+ (stdlib only, no pip dependencies)
+- Optional: GitHub Copilot token for `cp-*` model aliases
