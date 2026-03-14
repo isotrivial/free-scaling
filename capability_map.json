@@ -1,0 +1,133 @@
+{
+  "generated_at": "2026-03-14T07:00:00Z",
+  "methodology": "19 capability tests × 1-3 trials per model, 7 categories",
+  "categories": ["instruction", "factual", "nuance", "reasoning", "code", "calibration", "agreeableness"],
+  "profiles": {
+    "mistral-large": {
+      "accuracy": 1.0, "stability": 1.0, "avg_latency_s": 1.0,
+      "category_scores": {
+        "instruction": 1.0, "factual": 1.0, "nuance": 1.0,
+        "reasoning": 1.0, "code": 1.0, "calibration": 1.0, "agreeableness": 1.0
+      },
+      "strengths": ["all"], "weaknesses": [],
+      "verdict": "Gold standard. 100% across all categories. Use as arbiter."
+    },
+    "llama-3.3": {
+      "accuracy": 0.96, "stability": 0.98, "avg_latency_s": 1.9,
+      "category_scores": {
+        "instruction": 1.0, "factual": 0.78, "nuance": 1.0,
+        "reasoning": 1.0, "code": 1.0, "calibration": 1.0, "agreeableness": 1.0
+      },
+      "strengths": ["nuance", "reasoning", "code", "agreeableness"],
+      "weaknesses": [],
+      "verdict": "Strong all-rounder. Slight factual wobble (78%) but excellent everywhere else."
+    },
+    "qwen-80b": {
+      "accuracy": 0.95, "stability": 1.0, "avg_latency_s": 0.7,
+      "category_scores": {
+        "instruction": 1.0, "factual": 1.0, "nuance": 1.0,
+        "reasoning": 0.67, "code": 1.0, "calibration": 1.0, "agreeableness": 1.0
+      },
+      "strengths": ["code", "nuance", "agreeableness", "factual"],
+      "weaknesses": [],
+      "verdict": "Fastest accurate model. Reasoning slightly weak (67%) but strong everywhere else."
+    },
+    "mistral-nemotron": {
+      "accuracy": 0.95, "stability": 1.0, "avg_latency_s": 1.1,
+      "category_scores": {
+        "instruction": 1.0, "factual": 1.0, "nuance": 1.0,
+        "reasoning": 1.0, "code": 1.0, "calibration": 1.0, "agreeableness": 0.67
+      },
+      "strengths": ["factual", "reasoning", "code"],
+      "weaknesses": [],
+      "verdict": "Excellent technical model. Slight agreeableness issue (67%) — may not push back enough."
+    },
+    "gemma-27b": {
+      "accuracy": 0.93, "stability": 0.95, "avg_latency_s": 1.2,
+      "category_scores": {
+        "instruction": 1.0, "factual": 0.67, "nuance": 0.89,
+        "reasoning": 1.0, "code": 1.0, "calibration": 1.0, "agreeableness": 1.0
+      },
+      "strengths": ["reasoning", "code", "agreeableness"],
+      "weaknesses": [],
+      "verdict": "Solid. Factual (67%) and nuance (89%) slightly lower. Good diversity member."
+    },
+    "minimax-m2.5": {
+      "accuracy": 0.8, "stability": 1.0, "avg_latency_s": 11.7,
+      "category_scores": {
+        "factual": 1.0, "nuance": 0.0, "reasoning": 1.0,
+        "code": 1.0, "calibration": 1.0
+      },
+      "strengths": ["factual", "reasoning", "calibration"],
+      "weaknesses": ["nuance"],
+      "verdict": "Thinking model. Great at factual/reasoning but BLIND to nuance (0%). Very slow. Use as tiebreaker on factual disputes only."
+    },
+    "kimi-k2": {
+      "accuracy": 0.79, "stability": 0.91, "avg_latency_s": 0.6,
+      "category_scores": {
+        "instruction": 1.0, "factual": 1.0, "nuance": 1.0,
+        "reasoning": 1.0, "code": 0.44, "calibration": 1.0, "agreeableness": 0.22
+      },
+      "strengths": ["instruction", "factual", "nuance", "reasoning"],
+      "weaknesses": ["agreeableness", "code"],
+      "verdict": "Fastest model. Excellent at language tasks but too agreeable (22%) and weak on code (44%). NEVER use for code review or compliance checks."
+    },
+    "qwen-397b": {
+      "accuracy": 0.58, "stability": 1.0, "avg_latency_s": 4.4,
+      "category_scores": {
+        "instruction": 0.67, "factual": 0.67, "nuance": 1.0,
+        "reasoning": 0.67, "code": 0.0, "calibration": 1.0, "agreeableness": 0.33
+      },
+      "strengths": ["nuance", "calibration"],
+      "weaknesses": ["code", "agreeableness"],
+      "verdict": "Paradox: huge model but poor accuracy. Only good at nuance detection. Avoid for most tasks."
+    }
+  },
+  "data_driven_panels": {
+    "general": {
+      "models": ["mistral-large", "llama-3.3", "qwen-80b"],
+      "rationale": "Top 3 by accuracy with architecture diversity (Mistral, Meta, Qwen). All >95%."
+    },
+    "fast": {
+      "models": ["qwen-80b", "mistral-nemotron", "gemma-27b"],
+      "rationale": "All ≤1.2s. Qwen-80b is fastest accurate (0.7s, 95%)."
+    },
+    "code_review": {
+      "models": ["qwen-80b", "mistral-large", "mistral-nemotron"],
+      "rationale": "All 100% on code. AVOID kimi-k2 (44%) and qwen-397b (0%) for code tasks."
+    },
+    "compliance": {
+      "models": ["llama-3.3", "qwen-80b", "mistral-large"],
+      "rationale": "All 100% on nuance + agreeableness. Won't false-pass violations."
+    },
+    "reasoning": {
+      "models": ["mistral-large", "llama-3.3", "mistral-nemotron"],
+      "rationale": "All 100% on reasoning. MiniMax also 100% but too slow (11.7s)."
+    },
+    "arbiter": {
+      "models": ["mistral-large"],
+      "rationale": "100% across all 7 categories. Use as single tiebreaker when panels disagree."
+    }
+  },
+  "key_insights": {
+    "complementary_weaknesses": {
+      "kimi-k2_blind_spot": "agreeableness=22%, code=44% — too agreeable, won't catch violations",
+      "qwen-397b_blind_spot": "code=0%, agreeableness=33% — huge model, poor judgment",
+      "minimax-m2.5_blind_spot": "nuance=0% — thinking doesn't help with subtle violations",
+      "mistral-nemotron_mild": "agreeableness=67% — slight tendency to agree"
+    },
+    "size_not_accuracy": "qwen-397b (397B params, 58% acc) vs qwen-80b (80B params, 95% acc). Bigger ≠ better.",
+    "speed_not_accuracy": "kimi-k2 (0.6s, 79%) vs qwen-80b (0.7s, 95%). Similar speed, very different capability.",
+    "thinking_not_nuance": "MiniMax M2.5 thinks deeply but scores 0% on nuance. Chain-of-thought ≠ judgment.",
+    "mistral_large_is_gold": "Only model at 100% across all categories. Use as arbiter, not first-pass."
+  },
+  "routing_rules": [
+    "Default panel: mistral-large + llama-3.3 + qwen-80b (general)",
+    "Code tasks: NEVER include kimi-k2 or qwen-397b",
+    "Compliance/behavioral: ALWAYS include llama-3.3 (best at nuance + agreeableness)",
+    "Fast-path: qwen-80b + mistral-nemotron (both <1.2s, both >95%)",
+    "Disagreement arbitration: escalate to mistral-large alone (100% arbiter)",
+    "MiniMax M2.5: factual tiebreaker ONLY, never for nuance/compliance",
+    "2-stage: fast panel first → if split → general panel → if still split → arbiter"
+  ]
+}
