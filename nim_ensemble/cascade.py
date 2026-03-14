@@ -453,8 +453,17 @@ def scale_batch(
     with ThreadPoolExecutor(max_workers=max_parallel) as pool:
         futures = {pool.submit(_run_one, i, item): i for i, item in enumerate(items)}
         for fut in as_completed(futures):
-            idx, result = fut.result()
-            results[idx] = result
+            try:
+                idx, result = fut.result()
+                results[idx] = result
+            except Exception as e:
+                # Find the index for this future and record the error
+                idx = futures[fut]
+                results[idx] = CascadeResult(
+                    answer="ERROR", confidence=0.0, task_type="general",
+                    stage="error", calls_made=0, models_used=[],
+                    votes=[], reasoning=f"Batch item error: {e}",
+                )
     
     return results
 

@@ -2,6 +2,12 @@
 
 import re
 
+# Negation prefix detector — rejects "NOT SAFE" matching as SAFE
+_NEGATION_RE = re.compile(
+    r'\b(?:NOT|NO|ISN\'T|AREN\'T|DOESN\'T|DON\'T|NEVER|NEITHER|NOR)'
+    r'(?:\s+\w+){0,3}\s*$'  # up to 3 intervening words before the match
+)
+
 
 def strip_thinking(content: str) -> str:
     """Strip <think>...</think> blocks from content (MiniMax M2.5 style)."""
@@ -93,10 +99,6 @@ def parse_answer(raw_response: str, patterns: list[str] = None) -> str:
     
     # Second pass: match anywhere as whole word, but reject negated matches
     # Catches: "NOT SAFE", "not at all SAFE", "not really COMPLIANT", "ISN'T SAFE"
-    _NEGATION_RE = re.compile(
-        r'\b(?:NOT|NO|ISN\'T|AREN\'T|DOESN\'T|DON\'T|NEVER|NEITHER|NOR)'
-        r'(?:\s+\w+){0,3}\s*$'  # up to 3 intervening words before the match
-    )
     for pattern in search_patterns:
         escaped = re.escape(pattern)
         match = re.search(rf'\b{escaped}\b', first_line_clean)

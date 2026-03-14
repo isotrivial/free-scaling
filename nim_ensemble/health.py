@@ -35,10 +35,11 @@ def _mark_dead(alias: str):
 
 def _is_dead(alias: str) -> bool:
     """Check if a model is marked dead (respects TTL for auto-retry)."""
-    if alias not in _dead_models:
+    ts = _dead_models.get(alias)
+    if ts is None:
         return False
-    if time.time() - _dead_models[alias] > DEAD_TTL_S:
-        del _dead_models[alias]
+    if time.time() - ts > DEAD_TTL_S:
+        _dead_models.pop(alias, None)
         return False
     return True
 

@@ -49,13 +49,11 @@ COPILOT_MODELS = {
 
 def _refresh_copilot_token() -> bool:
     """Try to refresh the Copilot token via OpenClaw gateway."""
-    import subprocess
+    import urllib.request
     try:
-        # A quick gateway call triggers token refresh
-        subprocess.run(
-            ["curl", "-sf", "http://localhost:18789/v1/models"],
-            capture_output=True, timeout=10
-        )
+        req = urllib.request.Request("http://localhost:18789/v1/models")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            resp.read()
         time.sleep(1)  # give it a moment to write the new token
         return True
     except Exception:
@@ -275,8 +273,8 @@ def vote(
     
     models_used_ordered = []
     
-    if parallel and not short_circuit:
-        # Full parallel execution — collect results with model identity
+    if parallel:
+        # Parallel execution — submit all, optionally short-circuit on agreement
         with ThreadPoolExecutor(max_workers=len(model_aliases)) as pool:
             futures = {pool.submit(_call, alias): alias for alias in model_aliases}
             for fut in as_completed(futures):
@@ -286,9 +284,18 @@ def vote(
                 raw_responses.append(raw)
                 if ans == "ERROR":
                     errors.append(f"{alias}: {raw[:100]}")
+                
+                # Short-circuit: cancel remaining if first 2 non-error votes agree
+                if short_circuit and len(votes) >= 2:
+                    non_error = [v for v in votes if v != "ERROR"]
+                    if len(non_error) >= 2 and len(set(non_error)) == 1:
+                        # Cancel remaining futures
+                        for f in futures:
+                            f.cancel()
+                        break
     
-    elif short_circuit:
-        # Sequential with early exit on agreement
+    else:
+        # Sequential execution with optional short-circuit
         for i, alias in enumerate(model_aliases):
             _, ans, raw = _call(alias)
             votes.append(ans)
@@ -296,20 +303,10 @@ def vote(
             if ans == "ERROR":
                 errors.append(f"{alias}: {raw[:100]}")
             
-            # Check for short circuit after 2 votes
-            if i >= 1 and short_circuit:
+            if short_circuit and i >= 1:
                 non_error = [v for v in votes if v != "ERROR"]
                 if len(non_error) >= 2 and len(set(non_error)) == 1:
                     break
-    
-    else:
-        # Sequential, no short circuit
-        for alias in model_aliases:
-            _, ans, raw = _call(alias)
-            votes.append(ans)
-            raw_responses.append(raw)
-            if ans == "ERROR":
-                errors.append(f"{alias}: {raw[:100]}")
     
     # Count votes (exclude errors)
     non_error_votes = [v for v in votes if v != "ERROR"]

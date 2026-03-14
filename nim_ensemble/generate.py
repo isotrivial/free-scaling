@@ -63,7 +63,7 @@ def _pick_diverse_models(k: int, exclude: list[str] = None) -> list[str]:
             continue
         if _is_dead(alias):
             sub = _get_substitute(alias)
-            if sub and sub not in exclude and sub not in [s for s in selected]:
+            if sub and sub not in exclude and sub not in selected:
                 alias = sub
             else:
                 continue
@@ -116,7 +116,7 @@ def generate(
         effective_system = f"{system_prompt}\n\nHere is the material to work with:\n\n{context}"
 
     # ── Round 1: Generate ──────────────────────────────────────────
-    gen_models = models or _pick_diverse_models(k)
+    gen_models = list(models) if models else _pick_diverse_models(k)
     outputs = [None] * len(gen_models)
     gen_errors = []
     t1 = time.time()
@@ -322,7 +322,17 @@ def generate_batch(
     with ThreadPoolExecutor(max_workers=max_parallel) as pool:
         futures = {pool.submit(_run, i, item): i for i, item in enumerate(items)}
         for fut in as_completed(futures):
-            idx, result = fut.result()
-            results[idx] = result
+            try:
+                idx, result = fut.result()
+                results[idx] = result
+            except Exception as e:
+                idx = futures[fut]
+                results[idx] = GenerateResult(
+                    output="", all_outputs=[], models_used=[],
+                    winner_idx=-1, winner_model="", judge_votes=[],
+                    judge_confidence=0.0, gen_elapsed_s=0.0,
+                    judge_elapsed_s=0.0, total_elapsed_s=0.0,
+                    total_calls=0, errors=[f"Batch item error: {e}"],
+                )
 
     return results
