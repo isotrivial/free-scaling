@@ -458,6 +458,8 @@ def scale_batch(
             system_prompt=item.get("system_prompt"),
             max_tokens=item.get("max_tokens", 150),
             models=item.get("models"),
+            tag=item.get("tag"),
+            message_id=item.get("message_id"),
         )
     
     with ThreadPoolExecutor(max_workers=max_parallel) as pool:
@@ -486,6 +488,8 @@ def scale(
     system_prompt: str = None,
     max_tokens: int = 150,
     models: list[str] = None,
+    tag: str = None,
+    message_id: str = None,
 ) -> CascadeResult:
     """Scale inference by asking k models the same question.
     
@@ -620,9 +624,10 @@ def scale(
     
     answer, confidence = _weighted_majority(all_votes)
     
-    # --- Online learning: shadow challenger + ELO update ---
+    # --- Online learning: shadow challenger + ELO update + feedback log ---
     try:
         from . import elo as _elo
+        from .feedback import log_result as _log_fb
         
         # 1. Log panel votes to ELO
         _elo.update_from_votes(all_votes, answer)
@@ -645,8 +650,12 @@ def scale(
                     calls += 1
             except Exception:
                 pass  # Shadow failure never affects main result
+        
+        # 3. Log result for user feedback resolution
+        _log_fb(question=question, answer=answer, votes=all_votes,
+                tag=tag, message_id=message_id)
     except Exception:
-        pass  # ELO tracking is best-effort
+        pass  # ELO/feedback tracking is best-effort
     
     return CascadeResult(
         answer=answer,

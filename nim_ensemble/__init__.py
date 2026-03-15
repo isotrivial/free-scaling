@@ -28,6 +28,7 @@ from .models import MODELS, PANELS, get_model, get_panel, list_models, is_thinki
 from .parser import parse_answer, strip_thinking, extract_content
 from .health import health, probe_model
 from . import elo
+from . import feedback
 
 __all__ = [
     # Core API
@@ -50,6 +51,7 @@ __all__ = [
     "parse_answer", "strip_thinking", "extract_content",
     # Health
     "probe_model",
-    # ELO
+    # ELO + Feedback
     "elo",
+    "feedback",
 ]
