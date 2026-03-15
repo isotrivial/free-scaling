@@ -77,14 +77,15 @@ TASK_KEYWORDS = {
 }
 
 # Default panels — good starting points, override via capability_map.json
-# Hybrid panels: Copilot (accurate, 1M ctx) + NIM (diverse, independent errors)
+# ELO-seeded panels: NIM wins on classification (kimi-k2=85%, jamba=75%)
+# Copilot (60%) reserved for deep/long-context analysis only
 _DEFAULT_BEST_FOR_TASK = {
-    "code":       ["cp-4.1", "jamba-mini", "kimi-k2"],
-    "compliance": ["cp-4.1", "jamba-mini", "dracarys-70b"],
-    "reasoning":  ["cp-4.1", "kimi-k2", "jamba-mini"],
-    "factual":    ["cp-4.1", "jamba-mini", "dracarys-70b"],
-    "nuance":     ["cp-4.1", "kimi-k2", "dracarys-70b"],
-    "general":    ["cp-4.1", "jamba-mini", "kimi-k2"],
+    "code":       ["kimi-k2", "jamba-mini", "dracarys-70b"],
+    "compliance": ["kimi-k2", "jamba-mini", "dracarys-70b"],
+    "reasoning":  ["kimi-k2", "jamba-mini", "gemma-27b"],
+    "factual":    ["kimi-k2", "jamba-mini", "dracarys-70b"],
+    "nuance":     ["kimi-k2", "jamba-mini", "dracarys-70b"],
+    "general":    ["kimi-k2", "jamba-mini", "dracarys-70b"],
 }
 
 # Default weights (equal) — override via capability_map.json profiling
@@ -128,7 +129,7 @@ def _get_routing():
     
     return best_for, weights
 
-ARBITER = "cp-4.1"  # Free Copilot, 1M context, best accuracy
+ARBITER = "kimi-k2"  # 85% accuracy on ground-truth benchmark (ELO-seeded 2026-03-14)
 
 
 @dataclass
@@ -364,7 +365,7 @@ def _weighted_panel_vote(question, task_type, answer_patterns, system_prompt,
             best_for_task = bft
         if model_weights is None:
             model_weights = mw
-    panel_models = best_for_task.get(task_type, best_for_task.get("general", ["cp-4.1", "jamba-mini", "kimi-k2"]))
+    panel_models = best_for_task.get(task_type, best_for_task.get("general", ["kimi-k2", "jamba-mini", "dracarys-70b"]))
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -543,7 +544,21 @@ def scale(
             task_type = classify_task(question)
             best_for_task, _ = _get_routing()
             model = best_for_task.get(task_type, best_for_task["general"])[0]
-        ans, raw = call_model(question, model, effective_system, max_tokens)
+        try:
+            ans, raw = call_model(question, model, effective_system, max_tokens)
+        except Exception:
+            # Copilot down, network error — try NIM fallback
+            from .health import _mark_dead, _get_substitute
+            _mark_dead(model)
+            sub = _get_substitute(model)
+            if sub:
+                try:
+                    ans, raw = call_model(question, sub, effective_system, max_tokens)
+                    model = sub
+                except Exception:
+                    ans, raw = "ERROR", "Primary and substitute both failed"
+            else:
+                ans, raw = "ERROR", "Primary failed, no substitute"
         if answer_patterns and ans != "ERROR":
             ans = parse_answer(raw, patterns=answer_patterns)
 
@@ -566,11 +581,10 @@ def scale(
     else:
         families_seen = set()
         diverse_order = []
-        # Interleave Copilot + NIM for backend diversity
-        # (avoids all-Copilot panels that lose independent errors)
-        for alias in ["cp-4.1", "jamba-mini", "cp-flash", "kimi-k2",
-                      "cp-haiku", "dracarys-70b", "cp-mini",
-                      "llama-3.3", "mistral-medium", "gemma-27b"]:
+        # NIM first (better on classification), Copilot for diversity
+        for alias in ["kimi-k2", "jamba-mini", "dracarys-70b",
+                      "gemma-27b", "llama-3.3", "cp-4.1",
+                      "mistral-medium", "cp-flash", "cp-mini"]:
             if alias in MODELS:
                 fam = MODELS[alias]["family"]
                 if fam not in families_seen:

@@ -65,11 +65,12 @@ def _refresh_copilot_token() -> bool:
         try:
             with open(profile_path) as f:
                 data = json.load(f)
-            # Search for ghu_ tokens in the profile
-            for profile_name, profile_data in data.items():
+            # Profiles may be nested under "profiles" key
+            profiles = data.get("profiles", data)
+            for profile_name, profile_data in profiles.items():
                 if isinstance(profile_data, dict):
                     tok = profile_data.get("token", "")
-                    if tok.startswith("ghu_"):
+                    if isinstance(tok, str) and tok.startswith("ghu_"):
                         oauth_token = tok
                         break
             if oauth_token:
@@ -83,7 +84,12 @@ def _refresh_copilot_token() -> bool:
     try:
         req = urllib.request.Request(
             "https://api.github.com/copilot_internal/v2/token",
-            headers={"Authorization": f"token {oauth_token}"},
+            headers={
+                "Authorization": f"token {oauth_token}",
+                "Editor-Version": "vscode/1.96.0",
+                "Editor-Plugin-Version": "copilot/1.250.0",
+                "User-Agent": "GithubCopilot/1.250.0",
+            },
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
@@ -118,8 +124,8 @@ def _get_copilot_token() -> str:
     # Handle both seconds and milliseconds format
     expires = expires_raw / 1000 if expires_raw > 1e12 else expires_raw
     
-    if time.time() > expires:
-        # Try auto-refresh
+    # Proactive refresh: if <5min remaining, refresh before it expires
+    if time.time() > expires - 300:
         if _refresh_copilot_token():
             with open(token_path) as f:
                 data = json.load(f)
@@ -128,8 +134,9 @@ def _get_copilot_token() -> str:
             expires = expires_raw / 1000 if expires_raw > 1e12 else expires_raw
             if time.time() > expires:
                 raise RuntimeError("Copilot token expired — auto-refresh failed")
-        else:
+        elif time.time() > expires:
             raise RuntimeError("Copilot token expired — no OAuth token found")
+        # else: refresh failed but token still valid, continue
     
     return token
 

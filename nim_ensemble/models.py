@@ -156,20 +156,22 @@ MODELS = {
 # Default panels — diversity-based (mix model families for independent errors).
 # Override with capability_map.json for data-driven routing.
 PANELS = {
-    # General: 3 models from different backends (Copilot + NIM diversity)
-    "general": ["cp-4.1", "jamba-mini", "kimi-k2"],
+    # General: top 3 by ELO (seeded 2026-03-14, 20 questions × ground truth)
+    # kimi-k2 85%, jamba-mini 75%, dracarys-70b 75% (all NIM)
+    # Copilot models scored 50-60% on classification — better for analysis
+    "general": ["kimi-k2", "jamba-mini", "dracarys-70b"],
     # Fast: all <1s, max diversity
-    "fast": ["cp-mini", "dracarys-70b", "jamba-mini"],
-    # Hybrid: 2 Copilot + 3 NIM for maximum architecture diversity
-    "hybrid": ["cp-4.1", "cp-flash", "jamba-mini", "dracarys-70b", "kimi-k2"],
-    # Max: 5 models, all different families
-    "max": ["cp-4.1", "cp-haiku", "jamba-mini", "dracarys-70b", "kimi-k2"],
+    "fast": ["jamba-mini", "dracarys-70b", "llama-3.3"],
+    # Hybrid: NIM for voting + 1 Copilot for diversity
+    "hybrid": ["kimi-k2", "jamba-mini", "dracarys-70b", "cp-4.1", "gemma-27b"],
+    # Max: 5 best NIM models
+    "max": ["kimi-k2", "jamba-mini", "dracarys-70b", "gemma-27b", "llama-3.3"],
     # Deep: long-context analysis (1M context Copilot models)
     "deep": ["cp-4.1", "cp-mini", "cp-flash"],
-    # NIM-only: for when Copilot token is expired/unavailable
-    "nim": ["jamba-mini", "dracarys-70b", "kimi-k2"],
-    # Arbiter: single best tiebreaker
-    "arbiter": ["cp-4.1"],
+    # NIM-only: same as general (NIM won on classification)
+    "nim": ["kimi-k2", "jamba-mini", "dracarys-70b"],
+    # Arbiter: single best (kimi-k2 = 85% accuracy)
+    "arbiter": ["kimi-k2"],
 }
 
 
