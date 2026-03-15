@@ -157,14 +157,19 @@ def resolve_by_reaction(message_id: str, emoji: str) -> dict:
     Emoji mapping:
         👍 / ✅  → confirm (original answer correct)
         ❌ / 👎  → reject (mark wrong, but no override — models get penalty)
+        🅰️       → Panel A was right (boost A models, penalize B)
+        🅱️       → Panel B was right (boost B models, penalize A)
         🔴       → should have been URGENT
         🟡       → should have been NORMAL
         ⚪       → should have been IGNORE
-        ✅       → should have been SAFE / YES / COMPLIANT
+        🟢       → should have been SAFE / YES / COMPLIANT
         🔥       → should have been VULNERABLE / CRITICAL
     """
     CONFIRM_EMOJI = {"👍", "✅", "🫡"}
     REJECT_EMOJI = {"❌", "👎"}
+    AB_EMOJI = {"🅰️": "A", "🅱️": "B",
+                "\U0001f170\ufe0f": "A", "\U0001f171\ufe0f": "B",  # variant forms
+                "🇦": "A", "🇧": "B"}  # regional indicators as fallback
     OVERRIDE_MAP = {
         "🔴": "URGENT",
         "🟡": "NORMAL",
@@ -176,22 +181,88 @@ def resolve_by_reaction(message_id: str, emoji: str) -> dict:
     if emoji in CONFIRM_EMOJI:
         return resolve_feedback(message_id=message_id, confirmed=True)
     elif emoji in REJECT_EMOJI:
-        # Reject = penalize all models equally (no correct answer known)
         entries = _load()
         for e in entries:
             if e.get("message_id") == message_id and not e.get("resolved"):
                 votes = [(m, a, r) for m, a, r in e["votes"]]
-                # Penalize: use a bogus answer that no model picked → all get -ELO
                 elo.update_from_override(votes, "__REJECTED__")
                 e["resolved"] = True
                 e["feedback"] = "rejected"
                 _save(entries)
                 return {"resolved": True, "entry_id": e["id"], "feedback": "rejected"}
         return {"resolved": False, "error": "Entry not found"}
+    elif emoji in AB_EMOJI:
+        return _resolve_ab(message_id, AB_EMOJI[emoji])
     elif emoji in OVERRIDE_MAP:
         return resolve_feedback(message_id=message_id, correct_answer=OVERRIDE_MAP[emoji])
     else:
         return {"resolved": False, "error": f"Unknown emoji: {emoji}"}
+
+
+def _resolve_ab(message_id: str, winner: str) -> dict:
+    """Resolve A/B split — boost winning panel, penalize losing panel.
+    
+    winner: "A" (champion panel) or "B" (challenger panel)
+    
+    Looks up both tag=*-A and tag=*-B entries for this message.
+    """
+    entries = _load()
+    
+    # Find A and B entries for this message
+    a_entry = None
+    b_entry = None
+    for e in entries:
+        if e.get("message_id") == message_id and not e.get("resolved"):
+            tag = e.get("tag", "")
+            if tag.endswith("-B"):
+                b_entry = e
+            else:
+                a_entry = e
+    
+    # If we only have one entry, the A/B was logged in the same entry
+    # (from scale() auto-logging). Look for tag patterns.
+    if not a_entry and not b_entry:
+        # Try finding any unresolved entry for this message
+        for e in entries:
+            if e.get("message_id") == message_id and not e.get("resolved"):
+                a_entry = e
+                break
+    
+    resolved_ids = []
+    
+    if a_entry:
+        a_votes = [(m, a, r) for m, a, r in a_entry["votes"]]
+        if winner == "A":
+            elo.update_from_override(a_votes, a_entry["answer"])
+            a_entry["feedback"] = "ab_winner"
+        else:
+            # A lost — penalize A models
+            elo.update_from_override(a_votes, "__AB_LOSER__")
+            a_entry["feedback"] = "ab_loser"
+        a_entry["resolved"] = True
+        resolved_ids.append(a_entry["id"])
+    
+    if b_entry:
+        b_votes = [(m, a, r) for m, a, r in b_entry["votes"]]
+        if winner == "B":
+            elo.update_from_override(b_votes, b_entry["answer"])
+            b_entry["feedback"] = "ab_winner"
+        else:
+            elo.update_from_override(b_votes, "__AB_LOSER__")
+            b_entry["feedback"] = "ab_loser"
+        b_entry["resolved"] = True
+        resolved_ids.append(b_entry["id"])
+    
+    if not resolved_ids:
+        return {"resolved": False, "error": "No A/B entries found for this message"}
+    
+    _save(entries)
+    return {
+        "resolved": True,
+        "winner": winner,
+        "resolved_ids": resolved_ids,
+        "feedback": f"ab_winner={winner}",
+    }
 
 
 def pending(limit: int = 10) -> list:
