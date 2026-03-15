@@ -103,12 +103,49 @@ Returns the winner. Judges use different model families to avoid self-evaluation
 Probes all models with a trivial question. Reports ok/dead/slow/error + latency.
 Dead models (404/410) are auto-skipped in subsequent calls and retried after 5 minutes.
 
+## Online Learning (v3.3)
+
+Models self-select through deployment data. No manual benchmarking.
+
+```python
+from free_scaling import elo, feedback
+from free_scaling.evolve import evolve, report
+
+# Every scale() call automatically:
+# 1. Logs votes to ELO tracker
+# 2. Runs 1 shadow challenger for A/B data
+
+# Check rankings after deployment
+print(elo.summary())
+
+# User feedback — 4× stronger than consensus
+feedback.resolve_by_reaction(msg_id, "👍")   # confirm
+feedback.resolve_by_reaction(msg_id, "🅱️")   # Panel B wins
+feedback.resolve_by_reaction(msg_id, "🔴")   # override to URGENT
+
+# Weekly: check if panel should evolve
+result = evolve(dry_run=True)
+if result["changed"]:
+    evolve(dry_run=False)  # apply
+```
+
+**Signal sources:**
+- **Consensus** (automatic): models agreeing/disagreeing with majority → K=16
+- **Shadow challenger**: 1 extra model per call for free competitive data
+- **User feedback**: reactions on output → K=64 (4× stronger)
+- **A/B splits**: when panels disagree, user picks winner
+
+After ~30 calls/model, ELO data replaces static panel selection.
+
 ## Smart Features
 
+- **Online learning**: ELO-based model scoring from deployment data
+- **A/B testing**: shadow challengers run alongside panel for competitive signal
 - **Auto-heal**: Dead models get substituted with same-tier alternatives automatically
 - **Parallel short-circuit**: Submits all k in parallel, cancels when first 2 agree
 - **Task routing** (`k="auto"`): Classifies question type, routes to best expert
 - **Copilot integration**: `cp-*` aliases route through GitHub Copilot API
+- **User feedback loop**: Discord reactions → ELO updates (👍 🅰️🅱️ 🔴🟡⚪)
 - **Error isolation**: Batch functions catch per-item failures without killing the batch
 - **Thinking model support**: Handles MiniMax `<think>` blocks and Kimi `reasoning_content`
 
@@ -122,15 +159,17 @@ Dead models (404/410) are auto-skipped in subsequent calls and retried after 5 m
 
 All free via NVIDIA NIM. One API key covers everything.
 
-## Capability Profiling (optional)
+## Model Selection
 
-Default panels are diversity-based. For data-driven routing, profile models on your tasks:
+**Default**: panels are data-driven via ELO scoring from deployment. Start with static defaults, evolve automatically.
+
+**Manual profiling** (optional): for a quick snapshot before ELO accumulates data:
 
 ```bash
 python3 -m nim_ensemble.capability_map --models llama-3.3 gemma-27b mistral-large --trials 3
 ```
 
-Generates `capability_map.json` — the cascade loads it automatically to route around each model's blind spots.
+**ELO state**: stored at `~/.cache/free-scaling/elo.json`. View with `elo.summary()`. Reset by deleting the file.
 
 ## Use Cases
 

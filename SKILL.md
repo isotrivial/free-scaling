@@ -1,7 +1,7 @@
 ---
 name: free-scaling
-version: 3.2.0
-description: "$0 test-time scaling infrastructure. Classify, generate, and verify using free model ensembles. 13 NIM models + optional Copilot backend. Auto-heals when models die."
+version: 3.3.0
+description: "$0 test-time scaling with online learning. Classify, generate, and verify using free model ensembles. Models self-select via ELO scoring + A/B testing from deployment data. 13 NIM models + optional Copilot backend."
 ---
 
 # Free Scaling
@@ -98,13 +98,48 @@ status = health(models=["llama-3.3", "gemma-27b"])  # specific
 
 Dead models are auto-skipped in subsequent calls and retried after 5 minutes.
 
+## Online Learning (v3.3)
+
+Models self-select through deployment data. No manual benchmarking needed.
+
+```python
+from free_scaling import elo, feedback
+from free_scaling.evolve import evolve, report
+
+# Every scale() call automatically:
+# 1. Logs votes to ELO tracker
+# 2. Runs 1 shadow challenger for A/B data
+# 3. Logs result for user feedback resolution
+
+# Check current rankings
+print(elo.summary())
+
+# User feedback (4× stronger than consensus signal)
+feedback.resolve_by_reaction("discord-msg-id", "👍")   # confirm
+feedback.resolve_by_reaction("discord-msg-id", "🅱️")   # Panel B wins
+feedback.resolve_by_reaction("discord-msg-id", "🔴")   # override to URGENT
+
+# Weekly panel evolution
+result = evolve(dry_run=True)   # check if panel should change
+result = evolve(dry_run=False)  # apply the change
+```
+
+**How it works:**
+- Consensus: models that agree with majority get +ELO (K=16)
+- Override: user feedback is 4× stronger (K=64)
+- Shadow challenger: 1 extra model per call for free A/B data
+- Evolution: top-3 by ELO become champion panel (requires 30+ calls/model)
+
 ## Smart Features
 
+- **Online learning**: ELO-based model scoring from deployment data (see above)
+- **A/B testing**: shadow challengers run alongside panel for competitive signal
 - **Auto-heal**: 404/410 models get marked dead, substituted with same-tier alternatives, retried after 5min TTL
 - **Context routing**: `context` goes in system message, `question` stays in user message
 - **Parallel short-circuit**: submits all k models in parallel, cancels remaining when first 2 agree
 - **Task classification**: `k="auto"` classifies the question type and routes to the best expert
 - **Copilot integration**: `cp-*` aliases route automatically through GitHub Copilot API
+- **User feedback loop**: Discord reaction → ELO update (👍 confirm, 🅰️🅱️ A/B, 🔴🟡⚪ override)
 - **Error isolation**: batch functions catch per-item failures without killing the batch
 
 ## 13 Models Included
@@ -146,6 +181,9 @@ nim_ensemble/
 ├── health.py         # Model probing, dead-model tracking, substitution
 ├── models.py         # Model registry, panels
 ├── parser.py         # Answer extraction (thinking models, negation, word boundaries)
+├── elo.py            # Online ELO scoring, model ranking
+├── feedback.py       # User feedback loop (reactions → ELO updates)
+├── evolve.py         # Weekly panel evolution (promote/demote by ELO)
 ├── cli.py            # CLI interface
 ├── benchmark.py      # Single-trial profiling
 └── capability_map.py # Multi-trial profiling with error correlation
