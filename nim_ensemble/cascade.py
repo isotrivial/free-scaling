@@ -620,6 +620,34 @@ def scale(
     
     answer, confidence = _weighted_majority(all_votes)
     
+    # --- Online learning: shadow challenger + ELO update ---
+    try:
+        from . import elo as _elo
+        
+        # 1. Log panel votes to ELO
+        _elo.update_from_votes(all_votes, answer)
+        
+        # 2. Shadow challenger: run 1 extra model not in panel (if available)
+        panel_aliases = {v[0] for v in all_votes}
+        challenger = _elo.get_challenger(exclude=list(panel_aliases))
+        if not challenger:
+            challenger = _elo.get_explore_model(exclude=list(panel_aliases))
+        
+        if challenger:
+            try:
+                c_ans, c_raw = call_model(question, challenger, effective_system, max_tokens)
+                if answer_patterns and c_ans != "ERROR":
+                    c_ans = parse_answer(c_raw, patterns=answer_patterns)
+                if c_ans != "ERROR":
+                    # Score challenger against panel consensus
+                    challenger_votes = [(challenger, c_ans, 1.0)]
+                    _elo.update_from_votes(challenger_votes, answer)
+                    calls += 1
+            except Exception:
+                pass  # Shadow failure never affects main result
+    except Exception:
+        pass  # ELO tracking is best-effort
+    
     return CascadeResult(
         answer=answer,
         confidence=confidence,

@@ -27,6 +27,7 @@ from .generate import generate, generate_batch, GenerateResult
 from .models import MODELS, PANELS, get_model, get_panel, list_models, is_thinking
 from .parser import parse_answer, strip_thinking, extract_content
 from .health import health, probe_model
+from . import elo
 
 __all__ = [
     # Core API
@@ -49,4 +50,6 @@ __all__ = [
     "parse_answer", "strip_thinking", "extract_content",
     # Health
     "probe_model",
+    # ELO
+    "elo",
 ]
