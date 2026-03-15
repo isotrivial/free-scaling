@@ -77,14 +77,14 @@ TASK_KEYWORDS = {
 }
 
 # Default panels — good starting points, override via capability_map.json
-# Profiled on real judgment tasks 2026-03-14
+# Hybrid panels: Copilot (accurate, 1M ctx) + NIM (diverse, independent errors)
 _DEFAULT_BEST_FOR_TASK = {
-    "code":       ["jamba-mini", "dracarys-70b", "kimi-k2"],
-    "compliance": ["jamba-mini", "kimi-k2", "dracarys-70b"],
-    "reasoning":  ["jamba-mini", "kimi-k2", "llama-3.3"],
-    "factual":    ["jamba-mini", "dracarys-70b", "llama-3.3"],
-    "nuance":     ["jamba-mini", "kimi-k2", "dracarys-70b"],
-    "general":    ["jamba-mini", "dracarys-70b", "kimi-k2"],
+    "code":       ["cp-4.1", "jamba-mini", "kimi-k2"],
+    "compliance": ["cp-4.1", "jamba-mini", "dracarys-70b"],
+    "reasoning":  ["cp-4.1", "kimi-k2", "jamba-mini"],
+    "factual":    ["cp-4.1", "jamba-mini", "dracarys-70b"],
+    "nuance":     ["cp-4.1", "kimi-k2", "dracarys-70b"],
+    "general":    ["cp-4.1", "jamba-mini", "kimi-k2"],
 }
 
 # Default weights (equal) — override via capability_map.json profiling
@@ -128,7 +128,7 @@ def _get_routing():
     
     return best_for, weights
 
-ARBITER = "jamba-mini"  # 100% accuracy on real judgment tasks (profiled 2026-03-14)
+ARBITER = "cp-4.1"  # Free Copilot, 1M context, best accuracy
 
 
 @dataclass
@@ -364,7 +364,7 @@ def _weighted_panel_vote(question, task_type, answer_patterns, system_prompt,
             best_for_task = bft
         if model_weights is None:
             model_weights = mw
-    panel_models = best_for_task.get(task_type, best_for_task.get("general", ["jamba-mini", "dracarys-70b", "kimi-k2"]))
+    panel_models = best_for_task.get(task_type, best_for_task.get("general", ["cp-4.1", "jamba-mini", "kimi-k2"]))
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -566,10 +566,11 @@ def scale(
     else:
         families_seen = set()
         diverse_order = []
-        # Ordered by profiled accuracy (2026-03-14), then latency
-        for alias in ["jamba-mini", "dracarys-70b", "kimi-k2",
-                      "llama-3.3", "mistral-medium", "llama-405b",
-                      "mistral-large", "gemma-27b", "nemotron-super-49b"]:
+        # Interleave Copilot + NIM for backend diversity
+        # (avoids all-Copilot panels that lose independent errors)
+        for alias in ["cp-4.1", "jamba-mini", "cp-flash", "kimi-k2",
+                      "cp-haiku", "dracarys-70b", "cp-mini",
+                      "llama-3.3", "mistral-medium", "gemma-27b"]:
             if alias in MODELS:
                 fam = MODELS[alias]["family"]
                 if fam not in families_seen:
@@ -598,14 +599,31 @@ def scale(
             else:
                 return alias, "ERROR", "Model dead, no substitute"
         
-        ans, raw = call_model(question, effective_alias, effective_system, max_tokens)
+        try:
+            ans, raw = call_model(question, effective_alias, effective_system, max_tokens)
+        except Exception as e:
+            # Copilot token expired, network error, etc. — try NIM substitute
+            _mark_dead(effective_alias)
+            sub = _get_substitute(effective_alias)
+            if sub:
+                try:
+                    ans, raw = call_model(question, sub, effective_system, max_tokens)
+                    if answer_patterns and ans != "ERROR":
+                        ans = parse_answer(raw, patterns=answer_patterns)
+                    return sub, ans, raw
+                except Exception:
+                    pass
+            return alias, "ERROR", str(e)
         
         # Detect dead models (404/410) and mark for future calls
         if ans == "ERROR" and raw and any(code in raw for code in ["HTTP 404", "HTTP 410"]):
             _mark_dead(effective_alias)
             sub = _get_substitute(effective_alias)
             if sub:
-                ans, raw = call_model(question, sub, effective_system, max_tokens)
+                try:
+                    ans, raw = call_model(question, sub, effective_system, max_tokens)
+                except Exception:
+                    return alias, "ERROR", "Substitute also failed"
                 if answer_patterns and ans != "ERROR":
                     ans = parse_answer(raw, patterns=answer_patterns)
                 return sub, ans, raw

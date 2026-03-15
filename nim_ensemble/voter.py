@@ -48,41 +48,60 @@ COPILOT_MODELS = {
 
 
 def _refresh_copilot_token() -> bool:
-    """Try to refresh the Copilot token via OpenClaw gateway.
-
-    Triggers a gateway call, then polls the token file (up to 5 × 200ms)
-    waiting for expiresAt to update, instead of a blind 1s sleep.
+    """Refresh the Copilot session token using GitHub OAuth token.
+    
+    Uses the stored GitHub user token (ghu_*) to request a fresh
+    Copilot session token from api.github.com/copilot_internal/v2/token.
     """
     import urllib.request
+    import urllib.error
+    import glob
+    
     token_path = os.path.expanduser("~/.openclaw/credentials/github-copilot.token.json")
-
-    # Snapshot current expiry to detect when it changes
-    old_expires = 0
-    try:
-        with open(token_path) as f:
-            old_expires = json.load(f).get("expiresAt", 0)
-    except Exception:
-        pass
-
-    try:
-        req = urllib.request.Request("http://localhost:18789/v1/models")
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            resp.read()
-    except Exception:
-        return False
-
-    # Poll for token file update (5 × 200ms = 1s max, same budget as before)
-    for _ in range(5):
-        time.sleep(0.2)
+    
+    # Find GitHub OAuth token from auth-profiles
+    oauth_token = None
+    for profile_path in glob.glob(os.path.expanduser("~/.openclaw/agents/*/agent/auth-profiles.json")):
         try:
-            with open(token_path) as f:
-                if json.load(f).get("expiresAt", 0) != old_expires:
-                    return True
+            with open(profile_path) as f:
+                data = json.load(f)
+            # Search for ghu_ tokens in the profile
+            for profile_name, profile_data in data.items():
+                if isinstance(profile_data, dict):
+                    tok = profile_data.get("token", "")
+                    if tok.startswith("ghu_"):
+                        oauth_token = tok
+                        break
+            if oauth_token:
+                break
         except Exception:
             continue
-
-    # File didn't visibly change — caller will re-read and validate
-    return True
+    
+    if not oauth_token:
+        return False
+    
+    try:
+        req = urllib.request.Request(
+            "https://api.github.com/copilot_internal/v2/token",
+            headers={"Authorization": f"token {oauth_token}"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        
+        if "token" not in data:
+            return False
+        
+        # Save refreshed token
+        with open(token_path, "w") as f:
+            json.dump({
+                "token": data["token"],
+                "expiresAt": int(data.get("expires_at", 0)),
+                "updatedAt": int(time.time() * 1000),
+            }, f, indent=2)
+        
+        return True
+    except Exception:
+        return False
 
 
 def _get_copilot_token() -> str:
@@ -95,7 +114,9 @@ def _get_copilot_token() -> str:
         data = json.load(f)
     
     token = data.get("token", "")
-    expires = data.get("expiresAt", 0) / 1000
+    expires_raw = data.get("expiresAt", 0)
+    # Handle both seconds and milliseconds format
+    expires = expires_raw / 1000 if expires_raw > 1e12 else expires_raw
     
     if time.time() > expires:
         # Try auto-refresh
@@ -103,11 +124,12 @@ def _get_copilot_token() -> str:
             with open(token_path) as f:
                 data = json.load(f)
             token = data.get("token", "")
-            expires = data.get("expiresAt", 0) / 1000
+            expires_raw = data.get("expiresAt", 0)
+            expires = expires_raw / 1000 if expires_raw > 1e12 else expires_raw
             if time.time() > expires:
                 raise RuntimeError("Copilot token expired — auto-refresh failed")
         else:
-            raise RuntimeError("Copilot token expired — gateway refresh needed")
+            raise RuntimeError("Copilot token expired — no OAuth token found")
     
     return token
 
@@ -119,8 +141,15 @@ def call_copilot(
     max_tokens: int = 300,
     temperature: float = 0.1,
 ) -> tuple[str, str]:
-    """Call a Copilot model. Returns (parsed_answer, raw_content)."""
+    """Call a Copilot model directly. Auto-refreshes token via GitHub OAuth."""
     api_model = COPILOT_MODELS.get(model_alias, model_alias)
+    try:
+        from .models import MODELS
+        if model_alias in MODELS and MODELS[model_alias].get("backend") == "copilot":
+            api_model = MODELS[model_alias]["id"]
+    except (ImportError, KeyError):
+        pass
+    
     token = _get_copilot_token()
     
     messages = []
@@ -151,7 +180,7 @@ def call_copilot(
             },
         )
         
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=45) as resp:
             raw = resp.read().decode("utf-8")
         
         if not raw or not raw.startswith("{"):
@@ -181,6 +210,13 @@ def call_model(
     # Route Copilot models to call_copilot()
     if model_alias in COPILOT_MODELS:
         return call_copilot(prompt, model_alias, system_prompt, max_tokens, temperature)
+    # Also route models with backend=copilot from registry
+    try:
+        model_check = get_model(model_alias)
+        if model_check.get("backend") == "copilot":
+            return call_copilot(prompt, model_alias, system_prompt, max_tokens, temperature)
+    except KeyError:
+        pass
     model_info = get_model(model_alias)
     api_model = model_info["id"]
     key = _get_nim_key()

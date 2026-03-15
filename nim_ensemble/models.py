@@ -104,22 +104,72 @@ MODELS = {
         "thinking": True,
         "think_style": "separate",  # reasoning_content field, content can be null
     },
+
+    # ── Copilot models (free tier, 0× cost, 1M context) ──
+    "cp-4.1": {
+        "id": "gpt-4.1",
+        "speed": "fast",
+        "family": "openai",
+        "params": "?",
+        "thinking": False,
+        "backend": "copilot",
+        "context": 1000000,
+    },
+    "cp-mini": {
+        "id": "gpt-5-mini",
+        "speed": "fast",
+        "family": "openai",
+        "params": "?",
+        "thinking": False,
+        "backend": "copilot",
+        "context": 1000000,
+    },
+    "cp-4o": {
+        "id": "gpt-4o",
+        "speed": "fast",
+        "family": "openai",
+        "params": "?",
+        "thinking": False,
+        "backend": "copilot",
+        "context": 128000,
+    },
+    "cp-flash": {
+        "id": "gemini-3-flash-preview",
+        "speed": "fast",
+        "family": "google-cp",
+        "params": "?",
+        "thinking": False,
+        "backend": "copilot",
+        "context": 1000000,
+    },
+    "cp-haiku": {
+        "id": "claude-haiku-4.5",
+        "speed": "fast",
+        "family": "anthropic-cp",
+        "params": "?",
+        "thinking": False,
+        "backend": "copilot",
+        "context": 200000,
+    },
 }
 
 # Default panels — diversity-based (mix model families for independent errors).
 # Override with capability_map.json for data-driven routing.
 PANELS = {
-    # General: 3 top-performing families (AI21/Nvidia-Llama/Mistral-Kimi)
-    # Profiled on real judgment tasks 2026-03-14:
-    #   jamba-mini 100%, dracarys-70b 83%, kimi-k2 83%, llama-3.3 83%
-    #   mistral-large 50%, gemma-27b 50%, nemotron-super-49b 50%
-    "general": ["jamba-mini", "dracarys-70b", "kimi-k2"],
-    # Fast: all <1s, different families
-    "fast": ["jamba-mini", "dracarys-70b", "llama-3.3"],
-    # Max: 5 best models for highest confidence
-    "max": ["jamba-mini", "dracarys-70b", "kimi-k2", "llama-3.3", "mistral-medium"],
-    # Arbiter: single best tiebreaker (was mistral-large at 50%, jamba-mini at 100%)
-    "arbiter": ["jamba-mini"],
+    # General: 3 models from different backends (Copilot + NIM diversity)
+    "general": ["cp-4.1", "jamba-mini", "kimi-k2"],
+    # Fast: all <1s, max diversity
+    "fast": ["cp-mini", "dracarys-70b", "jamba-mini"],
+    # Hybrid: 2 Copilot + 3 NIM for maximum architecture diversity
+    "hybrid": ["cp-4.1", "cp-flash", "jamba-mini", "dracarys-70b", "kimi-k2"],
+    # Max: 5 models, all different families
+    "max": ["cp-4.1", "cp-haiku", "jamba-mini", "dracarys-70b", "kimi-k2"],
+    # Deep: long-context analysis (1M context Copilot models)
+    "deep": ["cp-4.1", "cp-mini", "cp-flash"],
+    # NIM-only: for when Copilot token is expired/unavailable
+    "nim": ["jamba-mini", "dracarys-70b", "kimi-k2"],
+    # Arbiter: single best tiebreaker
+    "arbiter": ["cp-4.1"],
 }
 
 
